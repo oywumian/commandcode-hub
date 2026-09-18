@@ -8,11 +8,12 @@ function sign(payload, secret) {
   return crypto.createHmac('sha256', secret).update(payload).digest('base64url');
 }
 
-export function createAdminAuth(config) {
+export function createAdminAuth(config, store) {
   const attempts = new Map();
+  let sessionVersion = store.getSessionVersion();
 
   function createToken() {
-    const payload = Buffer.from(JSON.stringify({ exp: Date.now() + TTL_MS, nonce: crypto.randomBytes(12).toString('hex') })).toString('base64url');
+    const payload = Buffer.from(JSON.stringify({ exp: Date.now() + TTL_MS, ver: sessionVersion, nonce: crypto.randomBytes(12).toString('hex') })).toString('base64url');
     return `${payload}.${sign(payload, config.sessionSecret)}`;
   }
 
@@ -21,7 +22,7 @@ export function createAdminAuth(config) {
     if (!payload || !signature || !safeEqual(signature, sign(payload, config.sessionSecret))) return false;
     try {
       const value = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-      return Number.isFinite(value.exp) && value.exp > Date.now();
+      return Number.isFinite(value.exp) && value.exp > Date.now() && value.ver === sessionVersion;
     } catch {
       return false;
     }
@@ -51,7 +52,7 @@ export function createAdminAuth(config) {
       const ip = clientIp(req);
       const state = attempts.get(ip) || { count: 0, blockedUntil: 0 };
       if (state.blockedUntil > Date.now()) return { ok: false, status: 429, error: 'Too many login attempts' };
-      if (!safeEqual(password, config.adminPassword)) {
+      if (!store.verifyAdminPassword(password)) {
         state.count += 1;
         if (state.count >= 5) {
           state.count = 0;
@@ -62,6 +63,10 @@ export function createAdminAuth(config) {
       }
       attempts.delete(ip);
       return { ok: true, cookie: cookieValue(req, createToken()) };
+    },
+    verifyPassword: (password) => store.verifyAdminPassword(password),
+    changePassword(password) {
+      sessionVersion = store.changeAdminPassword(password);
     },
     clearCookie: () => `${COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`,
   };

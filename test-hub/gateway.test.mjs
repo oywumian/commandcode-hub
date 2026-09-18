@@ -17,6 +17,10 @@ test('gateway validates its key and injects the selected account key', async () 
   const internalPort = await listen(internal);
   const logs = [];
   const store = {
+    getSessionVersion: () => 1,
+    verifyAdminPassword: (value) => value === 'admin',
+    changeAdminPassword: () => 2,
+    authenticateGatewayKey: (value) => value === 'gateway-secret' ? { id: 'gateway-1' } : null,
     getDefaultAccountWithKey: () => ({ id: 'account-1', apiKey: 'user_real_key' }),
     addRequestLog: (log) => logs.push(log),
   };

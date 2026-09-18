@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { decryptSecret, encryptSecret, hashSecret, maskSecret, safeEqual } from '../src/secrets.mjs';
+import { decryptSecret, encryptSecret, hashPassword, hashSecret, maskSecret, safeEqual, verifyPassword } from '../src/secrets.mjs';
 
 test('secrets encrypt, decrypt, mask, and reject tampering', () => {
   const encrypted = encryptSecret('user_secret_123456', 'master-password');
@@ -14,4 +14,12 @@ test('secrets encrypt, decrypt, mask, and reject tampering', () => {
   bytes[0] ^= 1;
   parts[3] = bytes.toString('base64url');
   assert.throws(() => decryptSecret(parts.join('.'), 'master-password'));
+});
+
+test('password hashes are salted and verifiable', () => {
+  const first = hashPassword('secret1');
+  const second = hashPassword('secret1');
+  assert.notEqual(first, second);
+  assert.equal(verifyPassword('secret1', first), true);
+  assert.equal(verifyPassword('wrong', first), false);
 });

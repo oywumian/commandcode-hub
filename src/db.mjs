@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import crypto from 'node:crypto';
 import Database from 'better-sqlite3';
-import { decryptSecret, encryptSecret, hashSecret, maskSecret } from './secrets.mjs';
+import { decryptSecret, encryptSecret, hashPassword, hashSecret, maskSecret, verifyPassword } from './secrets.mjs';
 
 export function createStore(config) {
   mkdirSync(config.dataDir, { recursive: true });
@@ -66,7 +66,49 @@ export function createStore(config) {
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS request_logs_time ON request_logs(created_at);
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS gateway_keys (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      key_hash TEXT NOT NULL UNIQUE,
+      key_masked TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      last_used_at INTEGER,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS gateway_keys_enabled ON gateway_keys(enabled);
   `);
+
+  const getSettingRow = (key) => db.prepare('SELECT value, updated_at FROM settings WHERE key = ?').get(key);
+  const setSetting = (key, value) => db.prepare(`INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`).run(key, value, Date.now());
+  db.transaction(() => {
+    if (!getSettingRow('admin_password_hash')) setSetting('admin_password_hash', hashPassword(config.adminPassword));
+    if (!getSettingRow('session_version')) setSetting('session_version', '1');
+    if (db.prepare('SELECT COUNT(*) AS count FROM gateway_keys').get().count === 0) {
+      const legacy = getSettingRow('gateway_api_key');
+      const apiKey = legacy ? decryptSecret(legacy.value, config.masterKey) : config.gatewayApiKey;
+      const now = Date.now();
+      db.prepare(`INSERT INTO gateway_keys (id, name, key_hash, key_masked, enabled, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 1, ?, ?)`).run(crypto.randomUUID(), 'Bootstrap key', hashSecret(apiKey), maskSecret(apiKey), now, now);
+      if (legacy) db.prepare("DELETE FROM settings WHERE key = 'gateway_api_key'").run();
+    }
+  })();
+
+  const publicGatewayKey = (row) => row && ({
+    id: row.id,
+    name: row.name,
+    maskedKey: row.key_masked,
+    enabled: Boolean(row.enabled),
+    lastUsedAt: row.last_used_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  });
 
   const publicAccount = (row) => row && ({
     id: row.id,
@@ -227,6 +269,66 @@ export function createStore(config) {
         COALESCE(AVG(duration_ms),0) AS avg_duration_ms
         FROM request_logs WHERE created_at >= ? GROUP BY CAST(created_at / ? AS INTEGER) ORDER BY time`)
         .all(bucketMs, bucketMs, from, bucketMs);
+    },
+    verifyAdminPassword(password) {
+      return verifyPassword(password, getSettingRow('admin_password_hash')?.value);
+    },
+    changeAdminPassword(password) {
+      return db.transaction(() => {
+        setSetting('admin_password_hash', hashPassword(password));
+        const version = Number.parseInt(getSettingRow('session_version')?.value || '1', 10) + 1;
+        setSetting('session_version', String(version));
+        return version;
+      })();
+    },
+    getSessionVersion: () => Number.parseInt(getSettingRow('session_version')?.value || '1', 10),
+    authenticateGatewayKey(apiKey) {
+      const row = db.prepare('SELECT * FROM gateway_keys WHERE key_hash = ? AND enabled = 1').get(hashSecret(apiKey));
+      if (!row) return null;
+      const now = Date.now();
+      if (!row.last_used_at || row.last_used_at < now - 60000) {
+        db.prepare('UPDATE gateway_keys SET last_used_at = ? WHERE id = ?').run(now, row.id);
+        row.last_used_at = now;
+      }
+      return publicGatewayKey(row);
+    },
+    listGatewayKeys: () => db.prepare('SELECT * FROM gateway_keys ORDER BY created_at DESC').all().map(publicGatewayKey),
+    createGatewayKey(name, apiKey) {
+      const now = Date.now();
+      const id = crypto.randomUUID();
+      db.prepare(`INSERT INTO gateway_keys (id, name, key_hash, key_masked, enabled, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 1, ?, ?)`).run(id, name, hashSecret(apiKey), maskSecret(apiKey), now, now);
+      return publicGatewayKey(db.prepare('SELECT * FROM gateway_keys WHERE id = ?').get(id));
+    },
+    updateGatewayKey(id, changes) {
+      const row = db.prepare('SELECT * FROM gateway_keys WHERE id = ?').get(id);
+      if (!row) return null;
+      const enabled = changes.enabled === undefined ? row.enabled : Number(Boolean(changes.enabled));
+      if (!enabled && row.enabled && db.prepare('SELECT COUNT(*) AS count FROM gateway_keys WHERE enabled = 1').get().count <= 1) {
+        const error = new Error('At least one API key must remain enabled');
+        error.status = 400;
+        throw error;
+      }
+      const name = String(changes.name || row.name).trim().slice(0, 60) || row.name;
+      db.prepare('UPDATE gateway_keys SET name = ?, enabled = ?, updated_at = ? WHERE id = ?').run(name, enabled, Date.now(), id);
+      return publicGatewayKey(db.prepare('SELECT * FROM gateway_keys WHERE id = ?').get(id));
+    },
+    deleteGatewayKey(id) {
+      const row = db.prepare('SELECT * FROM gateway_keys WHERE id = ?').get(id);
+      if (!row) return false;
+      if (row.enabled && db.prepare('SELECT COUNT(*) AS count FROM gateway_keys WHERE enabled = 1').get().count <= 1) {
+        const error = new Error('At least one API key must remain enabled');
+        error.status = 400;
+        throw error;
+      }
+      db.prepare('DELETE FROM gateway_keys WHERE id = ?').run(id);
+      return true;
+    },
+    getSecuritySettings() {
+      return {
+        apiKeys: db.prepare('SELECT * FROM gateway_keys ORDER BY created_at DESC').all().map(publicGatewayKey),
+        passwordUpdatedAt: getSettingRow('admin_password_hash')?.updated_at || null,
+      };
     },
     cleanup() {
       const now = Date.now();

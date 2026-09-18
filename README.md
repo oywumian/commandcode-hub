@@ -8,7 +8,7 @@
 - `POST /v1/messages`
 - `POST /v1/responses`
 - `GET /v1/models`
-- 一个全局网关 API Key
+- 多个可命名、可启停和删除的网关 API Key
 - 多个 Command Code 账号和手动默认账号切换
 - 从 `/root/.commandcode/auth.json` 导入当前 CLI 登录账号
 - 每 5 分钟刷新真实额度，保留 90 天趋势
@@ -63,8 +63,8 @@ openssl rand -hex 32
 
 分别生成随机值并编辑 `/etc/commandcode-hub.env`：
 
-- `GATEWAY_API_KEY`：客户端调用 `/v1/*` 时使用
-- `ADMIN_PASSWORD`：登录网页控制台使用
+- `GATEWAY_API_KEY`：首次启动自动迁移为名为 `Bootstrap key` 的网关 API Key。后续新增、停用、删除和轮换 Key 都在网页控制台的“系统”页面完成
+- `ADMIN_PASSWORD`：初始化管理员密码。首次登录后可在“系统”页面修改，数据库保存盐值加密哈希；修改后所有旧登录会话立即失效
 - `MASTER_KEY`：加密数据库中的 Command Code 密钥，丢失后无法解密
 - `SESSION_SECRET`：签名管理会话
 
@@ -116,6 +116,16 @@ OpenAI Base URL：`https://你的域名/v1`
 3. 在账号列表中选择默认账号。
 
 切换只影响新请求，已经开始的流式请求会继续使用原账号。当前版本不会自动故障转移；账号不可用时会明确返回错误，需在控制台手动切换。
+
+### 6. 管理密码和网关 Key
+
+网页控制台的“系统”页面支持：
+
+1. 创建多个命名的网关 API Key，为不同客户端分配独立凭证。
+2. 停用、启用和删除单个 Key；至少保留一个启用 Key。
+3. 修改管理员密码，最低 6 位；新密码只保存加盐哈希。
+
+网关 Key 只显示一次完整值，数据库只保存 SHA-256 哈希和脱敏预览。客户端改用新 Key 后，可立即停用旧 Key。
 
 ## 客户端配置
 

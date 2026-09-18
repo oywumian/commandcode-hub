@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 
 const VERSION = 'v1';
+const PASSWORD_VERSION = 's1';
 
 export function deriveKey(masterKey) {
   return crypto.scryptSync(masterKey, 'commandcode-hub:v1', 32);
@@ -24,6 +25,24 @@ export function decryptSecret(value, masterKey) {
 
 export function hashSecret(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+export function hashPassword(value) {
+  const salt = crypto.randomBytes(16);
+  const hash = crypto.scryptSync(String(value), salt, 64);
+  return `${PASSWORD_VERSION}.${salt.toString('base64url')}.${hash.toString('base64url')}`;
+}
+
+export function verifyPassword(value, encoded) {
+  const [version, salt, expected] = String(encoded || '').split('.');
+  if (version !== PASSWORD_VERSION || !salt || !expected) return false;
+  try {
+    const expectedBuffer = Buffer.from(expected, 'base64url');
+    const actual = crypto.scryptSync(String(value), Buffer.from(salt, 'base64url'), expectedBuffer.length);
+    return crypto.timingSafeEqual(actual, expectedBuffer);
+  } catch {
+    return false;
+  }
 }
 
 export function maskSecret(value) {

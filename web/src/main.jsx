@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
-  Activity, Check, ChevronRight, CircleDollarSign, Clock3, Gauge, KeyRound,
-  LayoutDashboard, LogOut, Menu, Plus, RefreshCw, Server, Settings2, Trash2,
-  UserRound, UsersRound, X,
+  Activity, Check, ChevronRight, CircleDollarSign, Clock3, Copy, Gauge, KeyRound,
+  LayoutDashboard, LockKeyhole, LogOut, Menu, Plus, RefreshCw, Server,
+  Settings2, ShieldCheck, Trash2, UsersRound, X,
 } from 'lucide-react';
 import {
   Area, AreaChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip,
@@ -59,6 +59,23 @@ function QuotaMeter({ label, value, cap, remaining, resetAt, estimated }) {
   </article>;
 }
 
+function AccountQuotaMeter({ label, used, cap, resetAt, estimated }) {
+  const ratio = percent(used, cap);
+  const remaining = ratio === null ? null : 100 - ratio;
+  const tone = remaining === null ? '' : remaining >= 50 ? 'ok' : remaining >= 20 ? 'warn' : 'danger';
+  return <div className="account-meter">
+    <div className="account-meter-head">
+      <span>{label}{estimated ? <small>估算</small> : null}</span>
+      <strong className={tone}>{remaining === null ? '不可用' : `剩余 ${remaining.toFixed(1)}%`}</strong>
+    </div>
+    <div className="account-meter-track"><i className={tone} style={{ width: `${remaining ?? 0}%` }} /></div>
+    <div className="account-meter-foot">
+      <span>{used === null || cap === null ? '额度不可用' : `已用 ${used.toFixed(2)} / ${cap.toFixed(2)}`}</span>
+      <span>{resetAt ? `重置 ${dateTime(resetAt)}` : '暂无重置点'}</span>
+    </div>
+  </div>;
+}
+
 function Stat({ icon: Icon, label, value, detail }) {
   return <article className="stat">
     <div className="stat-icon"><Icon size={18} /></div>
@@ -66,7 +83,7 @@ function Stat({ icon: Icon, label, value, detail }) {
   </article>;
 }
 
-function Login({ onLogin }) {
+function Login({ onLogin, notice }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -88,6 +105,7 @@ function Login({ onLogin }) {
       <div className="brand-mark"><CommandMark /></div>
       <p className="eyebrow">COMMAND CODE HUB</p>
       <h1>管理控制台</h1>
+      {notice ? <div className="notice success">{notice}</div> : null}
       <label>管理员密码<input type="password" autoFocus value={password} onChange={(e) => setPassword(e.target.value)} /></label>
       {error ? <div className="form-error">{error}</div> : null}
       <Button kind="primary" icon={KeyRound} busy={busy} type="submit">登录</Button>
@@ -146,13 +164,13 @@ function Overview({ data, reload, busy }) {
       <div className="chart-panel">
         <div className="section-title"><div><h2>额度趋势</h2><p>最近 30 天</p></div></div>
         {quotaChart.length ? <ResponsiveContainer width="100%" height={260}>
-          <LineChart data={quotaChart}><CartesianGrid stroke="#e1e5e0" vertical={false} /><XAxis dataKey="time" minTickGap={36} /><YAxis /><Tooltip /><Line type="monotone" dataKey="fiveHour" name="5 小时" stroke="#d06437" dot={false} strokeWidth={2} /><Line type="monotone" dataKey="weekly" name="每周" stroke="#287e68" dot={false} strokeWidth={2} /></LineChart>
+          <LineChart data={quotaChart}><CartesianGrid stroke="rgba(0, 0, 0, .06)" vertical={false} /><XAxis dataKey="time" minTickGap={36} /><YAxis /><Tooltip /><Line type="monotone" dataKey="fiveHour" name="5 小时" stroke="#0071e3" dot={false} strokeWidth={2} /><Line type="monotone" dataKey="weekly" name="每周" stroke="#86868b" dot={false} strokeWidth={2} /></LineChart>
         </ResponsiveContainer> : <Empty>还没有额度快照。</Empty>}
       </div>
       <div className="chart-panel">
         <div className="section-title"><div><h2>请求趋势</h2><p>最近 24 小时</p></div></div>
         {requestChart.length ? <ResponsiveContainer width="100%" height={260}>
-          <AreaChart data={requestChart}><CartesianGrid stroke="#e1e5e0" vertical={false} /><XAxis dataKey="time" minTickGap={36} /><YAxis allowDecimals={false} /><Tooltip /><Area type="monotone" dataKey="requests" name="请求" stroke="#287e68" fill="#dcece6" strokeWidth={2} /></AreaChart>
+          <AreaChart data={requestChart}><CartesianGrid stroke="rgba(0, 0, 0, .06)" vertical={false} /><XAxis dataKey="time" minTickGap={36} /><YAxis allowDecimals={false} /><Tooltip /><Area type="monotone" dataKey="requests" name="请求" stroke="#0071e3" fill="rgba(0, 113, 227, .12)" strokeWidth={2} /></AreaChart>
         </ResponsiveContainer> : <Empty>还没有请求记录。</Empty>}
       </div>
     </section>
@@ -204,20 +222,47 @@ function Accounts({ notify }) {
       <Button icon={KeyRound} busy={busy === 'import'} onClick={() => action('import', () => api('/api/admin/accounts/import', { method: 'POST' }), '认证文件已导入')}>从本机认证文件导入</Button>
       <span>{accounts.length} 个账号</span>
     </div>
-    {accounts.length ? <div className="table-wrap"><table><thead><tr><th>账号</th><th>套餐</th><th>额度状态</th><th>最近更新</th><th>启用</th><th /></tr></thead><tbody>
-      {accounts.map((account) => <tr key={account.id}>
-        <td><div className="account-cell"><span className={`avatar ${account.isDefault ? 'active' : ''}`}><UserRound size={17} /></span><div><strong>{account.name}</strong><small>{account.maskedKey}</small></div>{account.isDefault ? <span className="tag">默认</span> : null}</div></td>
-        <td>{account.planName || '不可用'}</td>
-        <td>{account.lastError ? <span className="bad">异常</span> : account.quota ? <span className="good">正常</span> : '未获取'}</td>
-        <td>{dateTime(account.lastQuotaAt)}</td>
-        <td><label className="switch"><input type="checkbox" checked={account.enabled} onChange={(e) => action(`enable-${account.id}`, () => api(`/api/admin/accounts/${account.id}`, { method: 'PUT', body: JSON.stringify({ enabled: e.target.checked }) }), '账号状态已更新')} /><i /></label></td>
-        <td><div className="row-actions">
-          {!account.isDefault ? <button className="icon-button" title="设为默认" onClick={() => action(`default-${account.id}`, () => api(`/api/admin/accounts/${account.id}/default`, { method: 'POST' }), '默认账号已切换')}><Check size={17} /></button> : null}
-          <button className="icon-button" title="刷新额度" onClick={() => action(`refresh-${account.id}`, () => api(`/api/admin/accounts/${account.id}/refresh`, { method: 'POST' }), '额度已刷新')}><RefreshCw className={busy === `refresh-${account.id}` ? 'spin' : ''} size={17} /></button>
-          <button className="icon-button danger" title="删除" onClick={() => confirm(`删除账号“${account.name}”？`) && action(`delete-${account.id}`, () => api(`/api/admin/accounts/${account.id}`, { method: 'DELETE' }), '账号已删除')}><Trash2 size={17} /></button>
-        </div></td>
-      </tr>)}
-    </tbody></table></div> : <Empty>还没有账号。</Empty>}
+    {accounts.length ? <div className="account-grid">
+      {accounts.map((account) => {
+        const credits = account.quota?.credits;
+        const monthly = account.quota?.monthly;
+        const status = account.lastError ? { label: '异常', className: 'error' } : account.quota ? { label: '正常', className: 'ok' } : { label: '未获取', className: 'muted' };
+        return <article key={account.id} className={`account-card ${account.enabled ? '' : 'off'}`}>
+          <header className="account-card-head">
+            <div><strong title={account.name}>{account.name}</strong><code>{account.maskedKey}</code></div>
+            <span className={`status-pill ${status.className}`}>{status.label}</span>
+          </header>
+          <div className="account-tags">
+            <span className="plan-pill">{account.planName || '套餐不可用'}</span>
+            <span className={`status-pill ${account.isDefault ? 'default' : 'muted'}`}>{account.isDefault ? '默认路由' : '备用'}</span>
+            <span className={`status-pill ${account.enabled ? 'ok' : 'muted'}`}>{account.enabled ? '已启用' : '已停用'}</span>
+          </div>
+          <div className="account-credits">
+            <span>月度余额<strong>{credits?.monthlyCredits ?? '不可用'}</strong></span>
+            <span>购买额度<strong>{credits?.purchasedCredits ?? '不可用'}</strong></span>
+            <span>免费额度<strong>{credits?.freeCredits ?? '不可用'}</strong></span>
+          </div>
+          <div className="account-meters">
+            <AccountQuotaMeter label="5 小时滚动" used={credits?.fiveHour?.used ?? null} cap={credits?.fiveHour?.cap ?? null} resetAt={credits?.fiveHour?.resetAt} />
+            <AccountQuotaMeter label="周额度" used={credits?.weekly?.used ?? null} cap={credits?.weekly?.cap ?? null} resetAt={credits?.weekly?.resetAt} />
+            <AccountQuotaMeter label="月额度" used={monthly?.used ?? null} cap={monthly?.cap ?? null} resetAt={monthly?.resetAt} estimated={monthly?.estimated} />
+          </div>
+          {account.lastError ? <p className="account-error" title={account.lastError}>{account.lastError}</p> : null}
+          <div className="account-card-foot">
+            <span>更新 {dateTime(account.lastQuotaAt)}</span>
+            <label className="switch" title={account.enabled ? '停用账号' : '启用账号'}>
+              <input type="checkbox" checked={account.enabled} onChange={(e) => action(`enable-${account.id}`, () => api(`/api/admin/accounts/${account.id}`, { method: 'PUT', body: JSON.stringify({ enabled: e.target.checked }) }), '账号状态已更新')} />
+              <i />
+            </label>
+          </div>
+          <div className="row-actions account-actions">
+            {!account.isDefault ? <button className="icon-button" title="设为默认" onClick={() => action(`default-${account.id}`, () => api(`/api/admin/accounts/${account.id}/default`, { method: 'POST' }), '默认账号已切换')}><Check size={17} /></button> : null}
+            <button className="icon-button" title="刷新额度" onClick={() => action(`refresh-${account.id}`, () => api(`/api/admin/accounts/${account.id}/refresh`, { method: 'POST' }), '额度已刷新')}><RefreshCw className={busy === `refresh-${account.id}` ? 'spin' : ''} size={17} /></button>
+            <button className="icon-button danger" title="删除" onClick={() => confirm(`删除账号“${account.name}”？`) && action(`delete-${account.id}`, () => api(`/api/admin/accounts/${account.id}`, { method: 'DELETE' }), '账号已删除')}><Trash2 size={17} /></button>
+          </div>
+        </article>;
+      })}
+    </div> : <Empty>还没有账号。</Empty>}
     <AccountDialog open={dialog} onClose={() => setDialog(false)} onSaved={() => { setDialog(false); load(); notify('账号已添加'); }} />
   </>;
 }
@@ -243,9 +288,37 @@ function Requests() {
   </>;
 }
 
-function SystemPage() {
+function ApiKeyResult({ apiKey, onClose, notify }) {
+  if (!apiKey) return null;
+  async function copyKey() {
+    await navigator.clipboard.writeText(apiKey);
+    notify('API Key 已复制');
+  }
+  return <div className="modal-backdrop" onMouseDown={onClose}>
+    <section className="modal" onMouseDown={(event) => event.stopPropagation()}>
+      <button className="icon-button close" type="button" onClick={onClose} title="关闭"><X size={18} /></button>
+      <p className="eyebrow">仅显示一次</p><h2>新的网关 API Key</h2>
+      <p className="modal-copy">旧 Key 已立即失效。请现在保存这个新 Key，关闭窗口后后台只显示掩码。</p>
+      <div className="secret-output"><code>{apiKey}</code><button className="icon-button" onClick={copyKey} title="复制 API Key"><Copy size={17} /></button></div>
+      <div className="modal-actions"><Button kind="primary" onClick={onClose}>我已保存</Button></div>
+    </section>
+  </div>;
+}
+
+function SystemPage({ notify, onPasswordChanged }) {
   const [runtime, setRuntime] = useState(null);
-  useEffect(() => { api('/api/admin/runtime').then(setRuntime); }, []);
+  const [security, setSecurity] = useState(null);
+  const [passwords, setPasswords] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [keyForm, setKeyForm] = useState({ name: '', password: '' });
+  const [generatedKey, setGeneratedKey] = useState('');
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  const load = useCallback(async () => {
+    const [runtimeData, securityData] = await Promise.all([api('/api/admin/runtime'), api('/api/admin/security')]);
+    setRuntime(runtimeData);
+    setSecurity(securityData);
+  }, []);
+  useEffect(() => { load(); }, [load]);
   const rows = runtime ? [
     ['服务状态', runtime.status === 'ok' ? '正常' : runtime.status],
     ['运行时间', `${whole(runtime.uptimeSeconds)} 秒`],
@@ -256,7 +329,84 @@ function SystemPage() {
     ['额度刷新', `${Math.round(runtime.quotaRefreshMs / 60000)} 分钟`],
     ['启动时间', dateTime(runtime.startedAt)],
   ] : [];
-  return <><div className="page-heading"><div><p className="eyebrow">运行环境</p><h1>系统</h1></div></div><section className="system-list">{rows.map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</section></>;
+  async function changePassword(event) {
+    event.preventDefault();
+    setError('');
+    if (passwords.newPassword !== passwords.confirmPassword) return setError('两次输入的新密码不一致');
+    setBusy('password');
+    try {
+      await api('/api/admin/security/password', {
+        method: 'POST',
+        body: JSON.stringify({ currentPassword: passwords.currentPassword, newPassword: passwords.newPassword }),
+      });
+      onPasswordChanged();
+    } catch (err) { setError(err.message); } finally { setBusy(''); }
+  }
+  async function createKey(event) {
+    event.preventDefault();
+    setError('');
+    setBusy('key');
+    try {
+      const result = await api('/api/admin/security/api-keys', { method: 'POST', body: JSON.stringify(keyForm) });
+      setGeneratedKey(result.apiKey);
+      setKeyForm({ name: '', password: '' });
+      await load();
+      notify('API Key 已创建');
+    } catch (err) { setError(err.message); } finally { setBusy(''); }
+  }
+  async function updateKey(id, changes, message) {
+    setError('');
+    setBusy(id);
+    try {
+      await api(`/api/admin/security/api-keys/${id}`, { method: 'PUT', body: JSON.stringify(changes) });
+      await load();
+      notify(message);
+    } catch (err) { setError(err.message); } finally { setBusy(''); }
+  }
+  async function deleteKey(id, name) {
+    if (!confirm(`删除 API Key“${name}”？使用它的客户端将立即无法访问。`)) return;
+    setError('');
+    setBusy(id);
+    try {
+      await api(`/api/admin/security/api-keys/${id}`, { method: 'DELETE' });
+      await load();
+      notify('API Key 已删除');
+    } catch (err) { setError(err.message); } finally { setBusy(''); }
+  }
+  return <>
+    <div className="page-heading"><div><p className="eyebrow">运行环境与安全</p><h1>系统</h1></div></div>
+    <section className="settings-section">
+      <div className="section-title"><div><h2>运行状态</h2><p>当前进程和内部代理</p></div><ShieldCheck size={19} /></div>
+      <div className="system-list">{rows.map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>
+    </section>
+    <section className="settings-section">
+      <div className="section-title"><div><h2>网关 API Keys</h2><p>为不同客户端创建独立密钥，可单独停用和删除</p></div><KeyRound size={19} /></div>
+      <div className="key-list">
+        {(security?.apiKeys || []).map((key) => <div className="key-row" key={key.id}>
+          <div className="key-identity"><strong>{key.name}</strong><code>{key.maskedKey}</code></div>
+          <div className="key-meta"><span>最近使用 {dateTime(key.lastUsedAt)}</span><span>创建于 {dateTime(key.createdAt)}</span></div>
+          <label className="switch" title={key.enabled ? '停用' : '启用'}><input type="checkbox" checked={key.enabled} disabled={busy === key.id} onChange={(event) => updateKey(key.id, { enabled: event.target.checked }, event.target.checked ? 'API Key 已启用' : 'API Key 已停用')} /><i /></label>
+          <button className="icon-button danger" disabled={busy === key.id} title="删除" onClick={() => deleteKey(key.id, key.name)}><Trash2 size={17} /></button>
+        </div>)}
+      </div>
+      <form className="security-form key-create" onSubmit={createKey}>
+        <label>名称<input value={keyForm.name} maxLength="60" onChange={(event) => setKeyForm({ ...keyForm, name: event.target.value })} placeholder="例如：OpenCode" required /></label>
+        <label>管理员密码<input type="password" value={keyForm.password} onChange={(event) => setKeyForm({ ...keyForm, password: event.target.value })} required autoComplete="current-password" /></label>
+        <Button kind="primary" icon={Plus} busy={busy === 'key'} type="submit">创建 API Key</Button>
+      </form>
+    </section>
+    <section className="settings-section">
+      <div className="section-title"><div><h2>管理员密码</h2><p>修改后所有现有登录会话立即失效</p></div><LockKeyhole size={19} /></div>
+      <form className="security-form" onSubmit={changePassword}>
+        <label>当前密码<input type="password" value={passwords.currentPassword} onChange={(event) => setPasswords({ ...passwords, currentPassword: event.target.value })} required autoComplete="current-password" /></label>
+        <label>新密码<input type="password" minLength="6" value={passwords.newPassword} onChange={(event) => setPasswords({ ...passwords, newPassword: event.target.value })} required autoComplete="new-password" /></label>
+        <label>确认新密码<input type="password" minLength="6" value={passwords.confirmPassword} onChange={(event) => setPasswords({ ...passwords, confirmPassword: event.target.value })} required autoComplete="new-password" /></label>
+        <Button kind="primary" icon={LockKeyhole} busy={busy === 'password'} type="submit">修改密码</Button>
+      </form>
+      {error ? <div className="form-error">{error}</div> : null}
+    </section>
+    <ApiKeyResult apiKey={generatedKey} onClose={() => setGeneratedKey('')} notify={notify} />
+  </>;
 }
 
 function App() {
@@ -266,6 +416,7 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [menu, setMenu] = useState(false);
   const [toast, setToast] = useState(null);
+  const [loginNotice, setLoginNotice] = useState('');
   useEffect(() => { api('/api/admin/session').then((data) => setAuthenticated(data.authenticated)).catch(() => setAuthenticated(false)); }, []);
   const loadOverview = useCallback(async () => {
     setBusy(true);
@@ -277,7 +428,7 @@ function App() {
     setTimeout(() => setToast(null), 3000);
   }
   if (authenticated === null) return <div className="loading"><RefreshCw className="spin" /></div>;
-  if (!authenticated) return <Login onLogin={() => setAuthenticated(true)} />;
+  if (!authenticated) return <Login notice={loginNotice} onLogin={() => { setLoginNotice(''); setAuthenticated(true); }} />;
   const navigation = [
     ['overview', LayoutDashboard, '总览'], ['accounts', UsersRound, '账号'], ['requests', Activity, '请求'], ['system', Settings2, '系统'],
   ];
@@ -293,7 +444,7 @@ function App() {
       {page === 'overview' ? <Overview data={overview} reload={loadOverview} busy={busy} /> : null}
       {page === 'accounts' ? <Accounts notify={notify} /> : null}
       {page === 'requests' ? <Requests /> : null}
-      {page === 'system' ? <SystemPage /> : null}
+      {page === 'system' ? <SystemPage notify={notify} onPasswordChanged={() => { setLoginNotice('密码已修改，请使用新密码重新登录'); setAuthenticated(false); }} /> : null}
     </main></div>
     {toast ? <div className={`toast ${toast.error ? 'error' : ''}`}>{toast.message}</div> : null}
   </div>;

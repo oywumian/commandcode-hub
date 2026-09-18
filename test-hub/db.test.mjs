@@ -15,8 +15,16 @@ const report = (name) => ({
 
 test('database maintains one enabled default account', () => {
   const dataDir = mkdtempSync(join(tmpdir(), 'commandcode-hub-'));
-  const store = createStore({ dataDir, masterKey: 'test-master', quotaRetentionDays: 90, requestRetentionDays: 7 });
+  const store = createStore({
+    dataDir, masterKey: 'test-master', adminPassword: 'admin1', gatewayApiKey: 'bootstrap-key',
+    quotaRetentionDays: 90, requestRetentionDays: 7,
+  });
   try {
+    assert.equal(store.authenticateGatewayKey('bootstrap-key').name, 'Bootstrap key');
+    const extra = store.createGatewayKey('CLI', 'second-key');
+    assert.equal(store.authenticateGatewayKey('second-key').id, extra.id);
+    store.updateGatewayKey(extra.id, { enabled: false });
+    assert.equal(store.authenticateGatewayKey('second-key'), null);
     const first = store.createAccount({ name: 'First', apiKey: 'user_first', report: report('first') });
     const second = store.createAccount({ name: 'Second', apiKey: 'user_second', report: report('second') });
     assert.equal(first.isDefault, true);

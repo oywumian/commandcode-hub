@@ -1,4 +1,5 @@
 import http from 'node:http';
+import crypto from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -7,7 +8,6 @@ import { createStore } from './db.mjs';
 import { fetchQuota } from './quota.mjs';
 import { createAdminAuth } from './admin-auth.mjs';
 import { createUsageParser } from './usage-parser.mjs';
-import { safeEqual } from './secrets.mjs';
 
 const MIME = {
   '.css': 'text/css; charset=utf-8',
@@ -75,9 +75,9 @@ function gatewayKey(req) {
   return String(req.headers['x-api-key'] || '');
 }
 
-function gatewayAuthenticated(req, config) {
+function gatewayAuthenticated(req, store) {
   const key = gatewayKey(req);
-  return Boolean(key) && safeEqual(key, config.gatewayApiKey);
+  return Boolean(key) && Boolean(store.authenticateGatewayKey(key));
 }
 
 function publicRuntime(startedAt, config, refreshing) {
@@ -131,7 +131,7 @@ function safeStaticPath(distDir, pathname) {
 }
 
 export function createHubApp(config, store, options = {}) {
-  const auth = createAdminAuth(config);
+  const auth = createAdminAuth(config, store);
   const startedAt = Date.now();
   const distDir = options.distDir || fileURLToPath(new URL('../dist', import.meta.url));
   let refreshing = false;
@@ -174,7 +174,7 @@ export function createHubApp(config, store, options = {}) {
   }
 
   async function proxyRequest(req, res, url) {
-    if (!gatewayAuthenticated(req, config)) {
+    if (!gatewayAuthenticated(req, store)) {
       return errorJson(res, 401, 'Invalid gateway API key', 'authentication_error');
     }
     const account = store.getDefaultAccountWithKey();
@@ -337,6 +337,41 @@ export function createHubApp(config, store, options = {}) {
     }
     if (url.pathname === '/api/admin/runtime' && req.method === 'GET') {
       return json(res, 200, publicRuntime(startedAt, config, refreshing));
+    }
+    if (url.pathname === '/api/admin/security' && req.method === 'GET') {
+      return json(res, 200, store.getSecuritySettings());
+    }
+    if (url.pathname === '/api/admin/security/password' && req.method === 'POST') {
+      const body = await readJson(req);
+      if (!auth.verifyPassword(String(body.currentPassword || ''))) {
+        return errorJson(res, 401, 'Current password is incorrect', 'authentication_error');
+      }
+      const newPassword = String(body.newPassword || '');
+      if (newPassword.length < 6 || newPassword.length > 256) {
+        return errorJson(res, 400, 'New password must be between 6 and 256 characters', 'invalid_password');
+      }
+      auth.changePassword(newPassword);
+      return json(res, 200, { changed: true, authenticated: false }, { 'Set-Cookie': auth.clearCookie() });
+    }
+    if (url.pathname === '/api/admin/security/api-keys' && req.method === 'POST') {
+      const body = await readJson(req);
+      if (!auth.verifyPassword(String(body.password || ''))) {
+        return errorJson(res, 401, 'Current password is incorrect', 'authentication_error');
+      }
+      const name = String(body.name || '').trim().slice(0, 60);
+      if (!name) return errorJson(res, 400, 'API key name is required', 'invalid_api_key');
+      const apiKey = `sk-${crypto.randomBytes(32).toString('hex')}`;
+      return json(res, 201, { apiKey, key: store.createGatewayKey(name, apiKey) });
+    }
+    const gatewayKeyMatch = url.pathname.match(/^\/api\/admin\/security\/api-keys\/([^/]+)$/);
+    if (gatewayKeyMatch && req.method === 'PUT') {
+      const key = store.updateGatewayKey(gatewayKeyMatch[1], await readJson(req));
+      if (!key) return errorJson(res, 404, 'API key not found', 'not_found');
+      return json(res, 200, { key });
+    }
+    if (gatewayKeyMatch && req.method === 'DELETE') {
+      if (!store.deleteGatewayKey(gatewayKeyMatch[1])) return errorJson(res, 404, 'API key not found', 'not_found');
+      return json(res, 200, { deleted: true });
     }
 
     const accountMatch = url.pathname.match(/^\/api\/admin\/accounts\/([^/]+)(?:\/(default|refresh|quota-history))?$/);
