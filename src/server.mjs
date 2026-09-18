@@ -83,6 +83,30 @@ function gatewayAuthenticated(req, store) {
   return Boolean(key) && Boolean(store.authenticateGatewayKey(key));
 }
 
+function accountQuotaScore(account) {
+  const credits = account.quota?.credits || {};
+  const windows = [credits.fiveHour, credits.weekly];
+  if (windows.some((window) => window?.exceeded)) return 10;
+  const ratios = windows.map((window) => {
+    if (!window || window.cap <= 0 || window.used === null || window.used === undefined) return null;
+    return Math.min(1, window.used / window.cap);
+  }).filter((value) => value !== null);
+  return ratios.length ? Math.max(...ratios) : 0.5;
+}
+
+function selectAccount(accounts, mode, modelId, isModelEnabled = () => true) {
+  const eligible = accounts.filter((account) => !modelId || isModelEnabled(account.id, modelId));
+  if (!eligible.length) return accounts[0] || null;
+  if (mode !== 'auto') return eligible.find((account) => account.isDefault) || eligible[0];
+  return [...eligible].sort((a, b) => {
+    const score = accountQuotaScore(a) - accountQuotaScore(b);
+    if (score) return score;
+    const error = Number(Boolean(a.lastError)) - Number(Boolean(b.lastError));
+    if (error) return error;
+    return Number(b.isDefault) - Number(a.isDefault);
+  })[0];
+}
+
 function normalizeClient(value = '') {
   const text = String(value).trim().slice(0, 80);
   const lower = text.toLowerCase();
@@ -243,11 +267,6 @@ export function createHubApp(config, store, options = {}) {
     if (!gatewayAuthenticated(req, store)) {
       return errorJson(res, 401, 'Invalid gateway API key', 'authentication_error');
     }
-    const account = store.getDefaultAccountWithKey();
-    if (!account) {
-      return errorJson(res, 503, 'No enabled default Command Code account. Select one in the admin dashboard.', 'account_unavailable');
-    }
-
     let body;
     try {
       body = await readBody(req, config.maxBodyBytes);
@@ -271,10 +290,30 @@ export function createHubApp(config, store, options = {}) {
       } catch {}
     }
 
+    const routingMode = store.getRoutingMode?.() || 'default';
+    const accounts = store.listEnabledAccountsWithKey?.() || [store.getDefaultAccountWithKey?.()].filter(Boolean);
+    const requestedModel = publicModelId(requestMeta.model);
+    const account = selectAccount(accounts, routingMode, requestedModel, (accountId, modelId) =>
+      typeof store.isAccountModelEnabled !== 'function' || store.isAccountModelEnabled(accountId, modelId));
+    if (!account) {
+      return errorJson(res, 503, routingMode === 'auto'
+        ? 'No enabled account is available for this model'
+        : 'No enabled default Command Code account. Select one in the admin dashboard.', 'account_unavailable');
+    }
+
     if (url.pathname === '/v1/models' && req.method === 'GET') {
       try {
-        const models = await getAccountModelCatalog(account);
-        const data = models.filter((model) => model.enabled).map((model) => ({
+        const catalogs = routingMode === 'auto'
+          ? await Promise.all(accounts.map((candidate) => getAccountModelCatalog(candidate)))
+          : [await getAccountModelCatalog(account)];
+        const byId = new Map();
+        for (const catalog of catalogs) {
+          for (const model of catalog) {
+            const existing = byId.get(model.id);
+            if (!existing || (!existing.enabled && model.enabled)) byId.set(model.id, model);
+          }
+        }
+        const data = [...byId.values()].filter((model) => model.enabled).map((model) => ({
           id: model.id,
           object: model.object || 'model',
           created: model.created,
@@ -286,7 +325,6 @@ export function createHubApp(config, store, options = {}) {
       }
     }
 
-    const requestedModel = publicModelId(requestMeta.model);
     if (requestedModel && typeof store.isAccountModelEnabled === 'function' && !store.isAccountModelEnabled(account.id, requestedModel)) {
       return errorJson(res, 400, `Model "${requestedModel}" is disabled for this account`, 'model_not_available');
     }
@@ -428,10 +466,20 @@ export function createHubApp(config, store, options = {}) {
         requestSeries: store.requestSeries(from),
         quotaHistory: defaultAccount ? store.getQuotaHistory(defaultAccount.id, Date.now() - 30 * 86400000) : [],
         runtime: publicRuntime(startedAt, config, refreshing),
+        routingMode: store.getRoutingMode?.() || 'default',
       });
     }
     if (url.pathname === '/api/admin/accounts' && req.method === 'GET') {
       return json(res, 200, { accounts: store.listAccounts() });
+    }
+    if (url.pathname === '/api/admin/routing' && req.method === 'GET') {
+      return json(res, 200, { mode: store.getRoutingMode?.() || 'default' });
+    }
+    if (url.pathname === '/api/admin/routing' && req.method === 'PUT') {
+      const body = await readJson(req);
+      const mode = String(body.mode || 'default');
+      if (!['default', 'auto'].includes(mode)) return errorJson(res, 400, 'Routing mode must be default or auto', 'invalid_routing_mode');
+      return json(res, 200, { mode: store.setRoutingMode(mode) });
     }
     if (url.pathname === '/api/admin/accounts' && req.method === 'POST') {
       const body = await readJson(req);

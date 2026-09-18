@@ -258,6 +258,9 @@ th:last-child, td:last-child { text-align: right; padding-right: 0; }
 .model-state.unavailable { color: var(--danger); background: rgba(255, 59, 48, .10); }
 .model-state.unknown { color: var(--warning); background: rgba(255, 159, 10, .12); }
 .model-state.untested { color: var(--secondary); background: rgba(0, 0, 0, .05); }
+.routing-select { display: flex; align-items: center; flex-direction: row; gap: 8px; white-space: nowrap; }
+.routing-select select { height: 34px; padding: 0 28px 0 10px; border: 1px solid var(--separator-strong); border-radius: 9px; background: var(--surface); color: var(--text); }
+.routing-note { color: var(--secondary); font-size: 12px; }
 .model-row.unavailable { background: rgba(255, 255, 255, .58); }
 .model-row.unavailable .model-id-cell code { color: var(--secondary); text-decoration: line-through; }
 .model-copy { width: 32px; height: 32px; }

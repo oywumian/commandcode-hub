@@ -209,6 +209,7 @@ export function createStore(config) {
     getAccount: (id) => publicAccount(getRawAccount(id)),
     getAccountWithKey: (id) => accountWithKey(getRawAccount(id)),
     getDefaultAccountWithKey: () => accountWithKey(db.prepare('SELECT * FROM accounts WHERE enabled = 1 AND is_default = 1').get()),
+    listEnabledAccountsWithKey: () => db.prepare('SELECT * FROM accounts WHERE enabled = 1 ORDER BY is_default DESC, name COLLATE NOCASE').all().map(accountWithKey),
     findByKey: (apiKey) => publicAccount(db.prepare('SELECT * FROM accounts WHERE api_key_hash = ?').get(hashSecret(apiKey))),
     createAccount: createAccountTx,
     updateAccount(id, changes) {
@@ -409,6 +410,12 @@ export function createStore(config) {
       })();
     },
     getSessionVersion: () => Number.parseInt(getSettingRow('session_version')?.value || '1', 10),
+    getRoutingMode: () => getSettingRow('routing_mode')?.value === 'auto' ? 'auto' : 'default',
+    setRoutingMode(mode) {
+      const value = mode === 'auto' ? 'auto' : 'default';
+      setSetting('routing_mode', value);
+      return value;
+    },
     authenticateGatewayKey(apiKey) {
       const row = db.prepare('SELECT * FROM gateway_keys WHERE key_hash = ? AND enabled = 1').get(hashSecret(apiKey));
       if (!row) return null;

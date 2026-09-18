@@ -215,13 +215,27 @@ function AccountDialog({ open, onClose, onSaved }) {
 
 function Accounts({ notify }) {
   const [accounts, setAccounts] = useState([]);
+  const [routingMode, setRoutingMode] = useState('default');
   const [busy, setBusy] = useState('');
   const [dialog, setDialog] = useState(false);
-  const load = useCallback(async () => setAccounts((await api('/api/admin/accounts')).accounts), []);
+  const load = useCallback(async () => {
+    const [accountData, routingData] = await Promise.all([api('/api/admin/accounts'), api('/api/admin/routing')]);
+    setAccounts(accountData.accounts || []);
+    setRoutingMode(routingData.mode || 'default');
+  }, []);
   useEffect(() => { load(); }, [load]);
   async function action(key, fn, message) {
     setBusy(key);
     try { await fn(); await load(); notify(message); } catch (error) { notify(error.message, true); } finally { setBusy(''); }
+  }
+  async function changeRoutingMode(event) {
+    const mode = event.target.value;
+    setBusy('routing');
+    try {
+      const data = await api('/api/admin/routing', { method: 'PUT', body: JSON.stringify({ mode }) });
+      setRoutingMode(data.mode);
+      notify(data.mode === 'auto' ? '已开启自动账号路由' : '已切回默认账号路由');
+    } catch (error) { notify(error.message, true); } finally { setBusy(''); }
   }
   return <>
     <div className="page-heading">
@@ -230,6 +244,13 @@ function Accounts({ notify }) {
     </div>
     <div className="toolbar-line">
       <Button icon={KeyRound} busy={busy === 'import'} onClick={() => action('import', () => api('/api/admin/accounts/import', { method: 'POST' }), '认证文件已导入')}>从本机认证文件导入</Button>
+      <label className="routing-select">API 路由
+        <select value={routingMode} onChange={changeRoutingMode} disabled={busy === 'routing'}>
+          <option value="default">固定默认账号</option>
+          <option value="auto">自动选择健康账号</option>
+        </select>
+      </label>
+      <span className="routing-note">{routingMode === 'auto' ? '请求会优先使用 5 小时和周额度更充足的账号' : '所有请求使用标记为默认路由的账号'}</span>
       <span>{accounts.length} 个账号</span>
     </div>
     {accounts.length ? <div className="account-grid">
