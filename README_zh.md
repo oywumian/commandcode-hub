@@ -1,6 +1,8 @@
 # Command Code Proxy
 
-> [English Docs](README.md)
+> 本文件是内置上游协议核心的原始说明。Command Code Hub 的部署与管理说明请看 [README.md](README.md)。
+
+> [Hub 部署文档](README.md)
 
 将 Command Code API 转换为 OpenAI / Anthropic 兼容接口的反代代理。单文件，零外部依赖。
 

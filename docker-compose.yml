@@ -1,15 +1,26 @@
 version: "3.9"
 
 services:
-  proxy:
+  hub:
     build: .
     ports:
       - "${PROXY_PORT:-3050}:3050"
     environment:
-      PORT: "3050"
+      NODE_ENV: production
+      HUB_HOST: 0.0.0.0
+      HUB_PORT: 3050
+      INTERNAL_PROXY_PORT: 3051
+      HUB_DATA_DIR: /data
+      GATEWAY_API_KEY: ${GATEWAY_API_KEY}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      MASTER_KEY: ${MASTER_KEY}
+      SESSION_SECRET: ${SESSION_SECRET}
+    volumes:
+      - ./data:/data
+      - ${HOME}/.commandcode:/root/.commandcode:ro
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--spider", "http://127.0.0.1:3050/health"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3050/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 3s
       retries: 3

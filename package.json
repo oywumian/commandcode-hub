@@ -1,18 +1,31 @@
 {
-  "name": "commandcode-proxy",
+  "name": "commandcode-hub",
   "version": "1.0.0",
   "type": "module",
-  "description": "Command Code → OpenAI 兼容代理",
+  "description": "Self-hosted Command Code gateway, quota dashboard, and OpenAI-compatible proxy",
   "license": "MIT",
-  "main": "proxy.mjs",
+  "main": "src/server.mjs",
   "scripts": {
-    "start": "node proxy.mjs",
-    "dev": "node --watch proxy.mjs",
-    "test": "node --test test/*.test.mjs",
-    "docker:build": "docker build -t commandcode-proxy:latest .",
-    "docker:build:multi": "docker buildx build --platform linux/amd64,linux/arm64 -t commandcode-proxy:latest ."
+    "start": "node src/server.mjs",
+    "dev": "node --watch src/server.mjs",
+    "dev:web": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "test": "node --test test/*.test.mjs test-hub/*.test.mjs",
+    "docker:build": "docker build -t commandcode-hub:latest .",
+    "docker:build:multi": "docker buildx build --platform linux/amd64,linux/arm64 -t commandcode-hub:latest ."
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.0.0"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "lucide-react": "^1.47.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "recharts": "^3.10.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.1.1",
+    "vite": "^8.3.0"
   }
 }
