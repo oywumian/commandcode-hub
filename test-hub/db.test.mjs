@@ -39,3 +39,25 @@ test('database maintains one enabled default account', () => {
     rmSync(dataDir, { recursive: true, force: true });
   }
 });
+
+test('database stores model eligibility independently for each account', () => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'commandcode-hub-models-'));
+  const store = createStore({
+    dataDir, masterKey: 'test-master', adminPassword: 'admin1', gatewayApiKey: 'bootstrap-key',
+    quotaRetentionDays: 90, requestRetentionDays: 7,
+  });
+  try {
+    const first = store.createAccount({ name: 'First', apiKey: 'user_first', report: report('first') });
+    const second = store.createAccount({ name: 'Second', apiKey: 'user_second', report: report('second') });
+    store.saveAccountModelTest(first.id, { modelId: 'shared-model', enabled: false, status: 'unavailable', error: 'MODEL_NOT_IN_PLAN' });
+    store.saveAccountModelTest(second.id, { modelId: 'shared-model', enabled: true, status: 'available', error: '' });
+    assert.equal(store.isAccountModelEnabled(first.id, 'shared-model'), false);
+    assert.equal(store.isAccountModelEnabled(second.id, 'shared-model'), true);
+    assert.equal(store.listAccountModelStates(first.id)[0].status, 'unavailable');
+    store.deleteAccount(first.id);
+    assert.deepEqual(store.listAccountModelStates(first.id), []);
+  } finally {
+    store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});

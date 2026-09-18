@@ -37,7 +37,9 @@ test('admin models proxy returns only the upstream model catalog', async () => {
     const data = await response.json();
     assert.equal(response.status, 200);
     assert.equal(requestedPath, '/v1/models');
-    assert.deepEqual(data.models, [{ id: 'gpt-test', object: 'model', owned_by: 'command-code' }]);
+    assert.equal(data.models[0].id, 'gpt-test');
+    assert.equal(data.models[0].enabled, true);
+    assert.equal(data.models[0].status, 'untested');
   } finally {
     await close(server);
     await close(internal);
@@ -79,7 +81,9 @@ test('admin models proxy reads the selected account catalog', async () => {
     assert.equal(response.status, 200);
     assert.equal(requestedAuth, 'Bearer user_second_key');
     assert.equal(data.account.id, 'account-2');
-    assert.deepEqual(data.models, [{ id: 'Kimi-K3', object: 'model', owned_by: 'command-code' }]);
+    assert.equal(data.models[0].id, 'Kimi-K3');
+    assert.equal(data.models[0].enabled, true);
+    assert.equal(data.models[0].status, 'untested');
   } finally {
     await close(server);
     await close(internal);

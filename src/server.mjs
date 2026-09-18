@@ -8,6 +8,8 @@ import { createStore } from './db.mjs';
 import { fetchQuota } from './quota.mjs';
 import { createAdminAuth } from './admin-auth.mjs';
 import { createUsageParser } from './usage-parser.mjs';
+import { createModelTester } from './model-tester.mjs';
+import { publicModelId } from '../model-catalog.mjs';
 
 const MIME = {
   '.css': 'text/css; charset=utf-8',
@@ -156,7 +158,47 @@ export function createHubApp(config, store, options = {}) {
   const auth = createAdminAuth(config, store);
   const startedAt = Date.now();
   const distDir = options.distDir || fileURLToPath(new URL('../dist', import.meta.url));
+  const modelTester = createModelTester({ config, store });
   let refreshing = false;
+
+  async function getAccountModelCatalog(account) {
+    let response;
+    try {
+      response = await fetch(`http://${config.internalHost}:${config.internalPort}/v1/models`, {
+        headers: {
+          authorization: `Bearer ${account.apiKey}`,
+          'x-api-key': account.apiKey,
+        },
+        signal: AbortSignal.timeout(12_000),
+      });
+    } catch (error) {
+      const wrapped = new Error(`Model catalog request failed: ${error.message}`);
+      wrapped.status = 502;
+      throw wrapped;
+    }
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(payload.error?.message || 'Model catalog request failed');
+      error.status = response.status;
+      throw error;
+    }
+
+    const states = new Map((store.listAccountModelStates?.(account.id) || []).map((state) => [state.modelId, state]));
+    const models = (Array.isArray(payload.data) ? payload.data : []).map((model) => {
+      const id = publicModelId(model.id);
+      const state = states.get(id);
+      return {
+        ...model,
+        id,
+        enabled: state?.enabled ?? true,
+        status: state?.status || 'untested',
+        error: state?.error || '',
+        testedAt: state?.testedAt ?? null,
+      };
+    });
+    return models;
+  }
 
   async function refreshAccount(id) {
     const account = store.getAccountWithKey(id);
@@ -225,6 +267,26 @@ export function createHubApp(config, store, options = {}) {
           toolNames: tools.names,
         };
       } catch {}
+    }
+
+    if (url.pathname === '/v1/models' && req.method === 'GET') {
+      try {
+        const models = await getAccountModelCatalog(account);
+        const data = models.filter((model) => model.enabled).map((model) => ({
+          id: model.id,
+          object: model.object || 'model',
+          created: model.created,
+          owned_by: model.owned_by || 'command-code',
+        }));
+        return json(res, 200, { object: 'list', data });
+      } catch (error) {
+        return errorJson(res, error.status || 502, error.message, 'upstream_error');
+      }
+    }
+
+    const requestedModel = publicModelId(requestMeta.model);
+    if (requestedModel && typeof store.isAccountModelEnabled === 'function' && !store.isAccountModelEnabled(account.id, requestedModel)) {
+      return errorJson(res, 400, `Model "${requestedModel}" is disabled for this account`, 'model_not_available');
     }
 
     const started = Date.now();
@@ -420,6 +482,18 @@ export function createHubApp(config, store, options = {}) {
       store.clearTerminalEvents();
       return json(res, 200, { cleared: true });
     }
+    if (url.pathname === '/api/admin/models/test' && req.method === 'GET') {
+      const accountId = url.searchParams.get('accountId');
+      if (!accountId) return errorJson(res, 400, 'accountId is required', 'invalid_request_error');
+      if (!store.getAccount(accountId)) return errorJson(res, 404, 'Account not found', 'not_found');
+      return json(res, 200, { job: modelTester.get(accountId) });
+    }
+    if (url.pathname === '/api/admin/models/test' && req.method === 'POST') {
+      const body = await readJson(req);
+      const account = body.accountId ? store.getAccountWithKey(String(body.accountId)) : null;
+      if (!account) return errorJson(res, 404, 'Account not found', 'not_found');
+      return json(res, 202, { job: modelTester.start(account) });
+    }
     if (url.pathname === '/api/admin/models' && req.method === 'GET') {
       const accountId = url.searchParams.get('accountId');
       const account = accountId ? store.getAccountWithKey(accountId) : store.getDefaultAccountWithKey();
@@ -428,26 +502,15 @@ export function createHubApp(config, store, options = {}) {
           ? errorJson(res, 404, 'Account not found', 'not_found')
           : errorJson(res, 503, 'No enabled default Command Code account', 'account_unavailable');
       }
-      let response;
       try {
-        response = await fetch(`http://${config.internalHost}:${config.internalPort}/v1/models`, {
-          headers: {
-            authorization: `Bearer ${account.apiKey}`,
-            'x-api-key': account.apiKey,
-          },
-          signal: AbortSignal.timeout(12000),
+        const models = await getAccountModelCatalog(account);
+        return json(res, 200, {
+          account: { id: account.id, name: account.name, enabled: account.enabled, isDefault: account.isDefault },
+          models,
         });
       } catch (error) {
-        return errorJson(res, 502, `Model catalog request failed: ${error.message}`, 'upstream_error');
+        return errorJson(res, error.status || 502, error.message, 'upstream_error');
       }
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        return errorJson(res, response.status, payload.error?.message || 'Model catalog request failed', 'upstream_error');
-      }
-      return json(res, 200, {
-        account: { id: account.id, name: account.name, enabled: account.enabled, isDefault: account.isDefault },
-        models: Array.isArray(payload.data) ? payload.data : [],
-      });
     }
     if (url.pathname === '/api/admin/runtime' && req.method === 'GET') {
       return json(res, 200, publicRuntime(startedAt, config, refreshing));

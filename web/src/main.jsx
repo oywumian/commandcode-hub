@@ -391,7 +391,9 @@ function ModelsPage({ notify }) {
   const [accounts, setAccounts] = useState([]);
   const [accountId, setAccountId] = useState('');
   const [models, setModels] = useState([]);
+  const [testJob, setTestJob] = useState({ status: 'idle' });
   const [loading, setLoading] = useState(true);
+  const [testing, setTesting] = useState(false);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
 
@@ -430,20 +432,78 @@ function ModelsPage({ notify }) {
     }
   }, [accountId]);
 
+  const loadTestStatus = useCallback(async () => {
+    if (!accountId) {
+      setTestJob({ status: 'idle' });
+      return null;
+    }
+    const data = await api(`/api/admin/models/test?accountId=${encodeURIComponent(accountId)}`);
+    setTestJob(data.job || { status: 'idle' });
+    return data.job || null;
+  }, [accountId]);
+
   useEffect(() => { loadAccounts(); }, [loadAccounts]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+    loadTestStatus().catch(() => setTestJob({ status: 'idle' }));
+  }, [load, loadTestStatus]);
+
+  useEffect(() => {
+    if (testJob.status !== 'running' || !accountId) return undefined;
+    const timer = setInterval(async () => {
+      try {
+        const job = await loadTestStatus();
+        if (job && job.status !== 'running') {
+          await load();
+          notify(job.status === 'completed' ? `检测完成：可用 ${job.available}，停用 ${job.unavailable}` : `检测失败：${job.error || '未知错误'}`);
+        }
+      } catch {}
+    }, 1200);
+    return () => clearInterval(timer);
+  }, [testJob.status, accountId, load, loadTestStatus, notify]);
 
   const selectedAccount = accounts.find((account) => account.id === accountId) || null;
   const filtered = models.filter((model) => String(model.id || '').toLowerCase().includes(query.trim().toLowerCase()));
+  const enabledCount = models.filter((model) => model.enabled).length;
+  const progress = testJob.total ? Math.round(testJob.completed / testJob.total * 100) : 0;
+
   async function copyModel(id) {
     await navigator.clipboard.writeText(id);
     notify('模型 ID 已复制');
   }
 
+  async function startTest() {
+    if (!accountId) return;
+    setTesting(true);
+    setError('');
+    try {
+      const data = await api('/api/admin/models/test', {
+        method: 'POST',
+        body: JSON.stringify({ accountId }),
+      });
+      setTestJob(data.job);
+      notify('可用性检测已开始');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  function modelState(model) {
+    if (model.enabled === false) return { key: 'unavailable', label: '不可用' };
+    if (model.status === 'available') return { key: 'available', label: '可用' };
+    if (model.status === 'unknown') return { key: 'unknown', label: '待确认' };
+    return { key: 'untested', label: '未检测' };
+  }
+
   return <>
     <div className="page-heading">
       <div><p className="eyebrow">账号权限目录</p><h1>模型库</h1></div>
-      <Button icon={RefreshCw} busy={loading} onClick={load}>刷新目录</Button>
+      <div className="actions">
+        <Button icon={Activity} kind="primary" busy={testing || testJob.status === 'running'} disabled={!accountId || testJob.status === 'running'} onClick={startTest}>检测可用性</Button>
+        <Button icon={RefreshCw} busy={loading} onClick={load}>刷新目录</Button>
+      </div>
     </div>
     <div className="terminal-toolbar model-toolbar">
       <label className="model-account">账号
@@ -458,14 +518,26 @@ function ModelsPage({ notify }) {
       </label>
       <span>{filtered.length} / {models.length} 个模型</span>
     </div>
-    {selectedAccount ? <p className="model-account-note">仅显示「{selectedAccount.name}」当前可使用的模型；品牌前缀已隐藏。</p> : null}
+    {selectedAccount ? <p className="model-account-note">「{selectedAccount.name}」已启用 {enabledCount} / {models.length}；终端 /v1/models 只返回已启用模型。</p> : null}
+    {testJob.status !== 'idle' ? <section className={`model-test-panel ${testJob.status}`}>
+      <div className="model-test-head">
+        <strong>{testJob.status === 'running' ? '正在检测账号权限' : testJob.status === 'failed' ? '检测未完成' : '检测完成'}</strong>
+        <span>{testJob.status === 'failed' ? testJob.error : `${testJob.completed} / ${testJob.total}`}</span>
+      </div>
+      <div className="model-test-track"><i style={{ width: `${progress}%` }} /></div>
+      <div className="model-test-foot"><span>{testJob.current ? `当前 ${testJob.current}` : '仅停用明确无权限的模型'}</span><span>可用 {testJob.available} · 停用 {testJob.unavailable} · 待确认 {testJob.unknown}</span></div>
+    </section> : null}
     {error ? <div className="notice error">{error}</div> : null}
     {filtered.length ? <div className="model-grid">
-      {filtered.map((model) => <article key={model.id} className="model-card">
-        <div className="model-card-head"><Boxes size={18} /><code>{model.id}</code></div>
-        <div className="model-card-meta"><span>{model.owned_by || '上游模型'}</span><span>{model.object || 'model'}</span></div>
-        <button className="icon-button" title="复制模型 ID" onClick={() => copyModel(model.id)}><Copy size={16} /></button>
-      </article>)}
+      {filtered.map((model) => {
+        const state = modelState(model);
+        return <article key={model.id} className={`model-card ${state.key}`}>
+          <div className="model-card-head"><Boxes size={18} /><code>{model.id}</code></div>
+          <span className={`model-state ${state.key}`}>{state.label}</span>
+          <div className="model-card-meta"><span>{model.owned_by || '上游模型'}</span><span title={model.error || ''}>{model.testedAt ? `检测 ${dateTime(model.testedAt)}` : model.object || 'model'}</span></div>
+          <button className="icon-button" title="复制模型 ID" onClick={() => copyModel(model.id)}><Copy size={16} /></button>
+        </article>;
+      })}
     </div> : <Empty>{loading ? '正在读取该账号的模型…' : accounts.length ? '没有匹配模型。' : '请先添加 Command Code 账号。'}</Empty>}
   </>;
 }

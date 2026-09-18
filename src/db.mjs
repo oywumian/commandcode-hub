@@ -31,6 +31,17 @@ export function createStore(config) {
       updated_at INTEGER NOT NULL
     );
     CREATE UNIQUE INDEX IF NOT EXISTS one_default_account ON accounts(is_default) WHERE is_default = 1;
+    CREATE TABLE IF NOT EXISTS account_models (
+      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      model_id TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      status TEXT NOT NULL DEFAULT 'untested',
+      error TEXT NOT NULL DEFAULT '',
+      tested_at INTEGER,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (account_id, model_id)
+    );
+    CREATE INDEX IF NOT EXISTS account_models_enabled ON account_models(account_id, enabled);
     CREATE TABLE IF NOT EXISTS quota_snapshots (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -248,6 +259,33 @@ export function createStore(config) {
         db.prepare('UPDATE accounts SET is_default = 1, updated_at = ? WHERE id = ?').run(Date.now(), id);
       })();
       return publicAccount(getRawAccount(id));
+    },
+    listAccountModelStates(accountId) {
+      return db.prepare(`SELECT model_id, enabled, status, error, tested_at, updated_at
+        FROM account_models WHERE account_id = ? ORDER BY model_id COLLATE NOCASE`).all(accountId).map((row) => ({
+          modelId: row.model_id,
+          enabled: Boolean(row.enabled),
+          status: row.status,
+          error: row.error,
+          testedAt: row.tested_at,
+          updatedAt: row.updated_at,
+        }));
+    },
+    saveAccountModelTest(accountId, result) {
+      const now = Date.now();
+      db.prepare(`INSERT INTO account_models
+        (account_id, model_id, enabled, status, error, tested_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(account_id, model_id) DO UPDATE SET
+          enabled=excluded.enabled, status=excluded.status, error=excluded.error,
+          tested_at=excluded.tested_at, updated_at=excluded.updated_at`)
+        .run(accountId, String(result.modelId || '').trim(), Number(Boolean(result.enabled)),
+          String(result.status || 'untested'), String(result.error || '').slice(0, 500), result.testedAt || now, now);
+    },
+    isAccountModelEnabled(accountId, modelId) {
+      const row = db.prepare('SELECT enabled FROM account_models WHERE account_id = ? AND model_id = ?')
+        .get(accountId, String(modelId || '').trim());
+      return !row || Boolean(row.enabled);
     },
     saveQuota(id, report) {
       const now = Date.now();
