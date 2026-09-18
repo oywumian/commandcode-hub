@@ -195,6 +195,11 @@ th:last-child, td:last-child { text-align: right; padding-right: 0; }
 .model-account { flex: 0 1 250px; min-width: 200px; }
 .model-account select { height: 44px; padding: 0 36px 0 12px; border: 1px solid var(--separator-strong); border-radius: 10px; background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, .04); }
 .model-account-note { margin: -8px 0 18px; color: var(--secondary); font-size: 12px; }
+.model-usage-strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1px; margin: -4px 0 20px; overflow: hidden; background: var(--separator); border: 1px solid var(--separator); border-radius: 14px; }
+.model-usage-strip span { min-width: 0; display: grid; gap: 5px; padding: 13px 15px; background: var(--surface); }
+.model-usage-strip small { color: var(--secondary); font-size: 10px; }
+.model-usage-strip strong { overflow: hidden; color: var(--text); font-size: 15px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.model-usage-strip strong.muted { color: var(--tertiary); font-size: 12px; font-weight: 500; }
 .model-test-panel { margin: -4px 0 20px; padding: 16px 18px; background: var(--surface); border: 1px solid var(--separator); border-radius: 14px; box-shadow: var(--shadow-card); }
 .model-test-head, .model-test-foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .model-test-head strong { font-size: 13px; font-weight: 650; }
@@ -230,6 +235,7 @@ th:last-child, td:last-child { text-align: right; padding-right: 0; }
 .model-table tbody tr:hover { background: rgba(0, 0, 0, .022); }
 .model-col-id { width: 42%; }
 .model-col-state { width: 12%; }
+.model-col-tokens { width: 14%; }
 .model-col-owner { width: 17%; }
 .model-col-tested { width: 20%; }
 .model-col-action { width: 9%; }
@@ -304,10 +310,13 @@ input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0, 113, 22
   .model-table-wrap { max-height: 62vh; }
   .model-table { min-width: 0; }
   .model-table col.model-col-owner, .model-table col.model-col-tested { display: none; }
-  .model-table th:nth-child(3), .model-table td:nth-child(3), .model-table th:nth-child(4), .model-table td:nth-child(4) { display: none; }
-  .model-col-id { width: 60%; }
-  .model-col-state { width: 24%; }
-  .model-col-action { width: 16%; }
+  .model-table th:nth-child(4), .model-table td:nth-child(4), .model-table th:nth-child(5), .model-table td:nth-child(5) { display: none; }
+  .model-col-id { width: 48%; }
+  .model-col-state { width: 22%; }
+  .model-col-tokens { width: 20%; }
+  .model-col-action { width: 10%; }
   .model-table th, .model-table td { padding: 0 12px; }
   .model-id-cell code { max-width: 43vw; }
+  .model-usage-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .model-usage-strip span:last-child { grid-column: 1 / -1; }
 }

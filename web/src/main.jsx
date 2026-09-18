@@ -391,6 +391,7 @@ function ModelsPage({ notify }) {
   const [accounts, setAccounts] = useState([]);
   const [accountId, setAccountId] = useState('');
   const [models, setModels] = useState([]);
+  const [usage, setUsage] = useState(null);
   const [testJob, setTestJob] = useState({ status: 'idle' });
   const [loading, setLoading] = useState(true);
   const [testing, setTesting] = useState(false);
@@ -417,6 +418,7 @@ function ModelsPage({ notify }) {
   const load = useCallback(async () => {
     if (!accountId) {
       setModels([]);
+      setUsage(null);
       setLoading(false);
       return;
     }
@@ -425,6 +427,7 @@ function ModelsPage({ notify }) {
     try {
       const data = await api(`/api/admin/models?accountId=${encodeURIComponent(accountId)}`);
       setModels(data.models || []);
+      setUsage(data.usage || null);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -466,6 +469,7 @@ function ModelsPage({ notify }) {
   const filtered = models.filter((model) => String(model.id || '').toLowerCase().includes(query.trim().toLowerCase()));
   const enabledCount = models.filter((model) => model.enabled).length;
   const progress = testJob.total ? Math.round(testJob.completed / testJob.total * 100) : 0;
+  const usageByModel = new Map((usage?.models || []).map((item) => [item.modelId, item]));
 
   async function copyModel(id) {
     await navigator.clipboard.writeText(id);
@@ -518,7 +522,16 @@ function ModelsPage({ notify }) {
       </label>
       <span>{filtered.length} / {models.length} 个模型</span>
     </div>
-    {selectedAccount ? <p className="model-account-note">「{selectedAccount.name}」已启用 {enabledCount} / {models.length}；终端 /v1/models 只返回已启用模型。</p> : null}
+    {selectedAccount ? <>
+      <p className="model-account-note">「{selectedAccount.name}」已启用 {enabledCount} / {models.length}；终端 /v1/models 只返回已启用模型。</p>
+      <div className="model-usage-strip">
+        <span><small>今日请求</small><strong>{whole(usage?.requests)}</strong></span>
+        <span><small>今日输入 Token</small><strong>{whole(usage?.inputTokens)}</strong></span>
+        <span><small>今日输出 Token</small><strong>{whole(usage?.outputTokens)}</strong></span>
+        <span><small>今日总 Token</small><strong>{whole(usage?.totalTokens)}</strong></span>
+        <span><small>今日已消耗额度</small><strong className={usage?.credits?.value === null ? 'muted' : ''}>{usage?.credits?.value === null ? '暂无数据' : decimal(usage.credits.value)}</strong></span>
+      </div>
+    </> : null}
     {testJob.status !== 'idle' ? <section className={`model-test-panel ${testJob.status}`}>
       <div className="model-test-head">
         <strong>{testJob.status === 'running' ? '正在检测账号权限' : testJob.status === 'failed' ? '检测未完成' : '检测完成'}</strong>
@@ -530,14 +543,15 @@ function ModelsPage({ notify }) {
     {error ? <div className="notice error">{error}</div> : null}
     {filtered.length ? <div className="model-table-wrap">
       <table className="model-table">
-        <colgroup><col className="model-col-id" /><col className="model-col-state" /><col className="model-col-owner" /><col className="model-col-tested" /><col className="model-col-action" /></colgroup>
-        <thead><tr><th>模型 ID</th><th>状态</th><th>来源</th><th>检测时间</th><th><span className="sr-only">操作</span></th></tr></thead>
+        <colgroup><col className="model-col-id" /><col className="model-col-state" /><col className="model-col-tokens" /><col className="model-col-owner" /><col className="model-col-tested" /><col className="model-col-action" /></colgroup>
+        <thead><tr><th>模型 ID</th><th>状态</th><th>今日 Token</th><th>来源</th><th>检测时间</th><th><span className="sr-only">操作</span></th></tr></thead>
         <tbody>
       {filtered.map((model) => {
         const state = modelState(model);
             return <tr key={model.id} className={`model-row ${state.key}`}>
               <td><div className="model-id-cell"><Boxes size={16} /><code title={model.id}>{model.id}</code></div></td>
               <td><span className={`model-state ${state.key}`}>{state.label}</span></td>
+              <td className="model-tokens">{whole(usageByModel.get(model.id)?.totalTokens)}</td>
               <td className="model-owner">{model.owned_by || '上游模型'}</td>
               <td className="model-tested" title={model.error || ''}>{model.testedAt ? dateTime(model.testedAt) : '未检测'}</td>
               <td><button className="icon-button model-copy" title="复制模型 ID" onClick={() => copyModel(model.id)}><Copy size={15} /></button></td>

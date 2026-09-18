@@ -504,9 +504,14 @@ export function createHubApp(config, store, options = {}) {
       }
       try {
         const models = await getAccountModelCatalog(account);
+        const dayStart = new Date();
+        dayStart.setHours(0, 0, 0, 0);
+        const usage = store.modelUsageToday?.(account.id, dayStart.getTime()) || { requests: 0, inputTokens: 0, outputTokens: 0, cachedTokens: 0, reasoningTokens: 0, totalTokens: 0, models: [] };
+        usage.credits = store.confirmedCreditsUsedToday?.(account.id, dayStart.getTime()) || { value: null, status: 'unavailable', from: null, at: null };
         return json(res, 200, {
           account: { id: account.id, name: account.name, enabled: account.enabled, isDefault: account.isDefault },
           models,
+          usage,
         });
       } catch (error) {
         return errorJson(res, error.status || 502, error.message, 'upstream_error');

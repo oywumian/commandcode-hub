@@ -61,3 +61,28 @@ test('database stores model eligibility independently for each account', () => {
     rmSync(dataDir, { recursive: true, force: true });
   }
 });
+
+test('database reports daily model tokens and measured credit deltas', () => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'commandcode-hub-usage-'));
+  const store = createStore({
+    dataDir, masterKey: 'test-master', adminPassword: 'admin1', gatewayApiKey: 'bootstrap-key',
+    quotaRetentionDays: 90, requestRetentionDays: 7,
+  });
+  try {
+    const account = store.createAccount({ name: 'Usage', apiKey: 'user_usage', report: report('usage') });
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const dayStart = start.getTime();
+    store.db.prepare('INSERT INTO quota_snapshots (account_id, captured_at, monthly_remaining) VALUES (?, ?, ?)').run(account.id, dayStart + 1000, 10);
+    store.db.prepare('INSERT INTO quota_snapshots (account_id, captured_at, monthly_remaining) VALUES (?, ?, ?)').run(account.id, dayStart + 2000, 8.25);
+    store.addRequestLog({ accountId: account.id, path: '/v1/chat/completions', model: 'model-a', status: 200, durationMs: 10, inputTokens: 100, outputTokens: 20 });
+    store.addRequestLog({ accountId: account.id, path: '/v1/chat/completions', model: 'model-a', status: 200, durationMs: 10, inputTokens: 50, outputTokens: 5 });
+    const usage = store.modelUsageToday(account.id, dayStart);
+    assert.equal(usage.totalTokens, 175);
+    assert.equal(usage.models[0].totalTokens, 175);
+    assert.equal(store.confirmedCreditsUsedToday(account.id, dayStart).value, 1.75);
+  } finally {
+    store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});

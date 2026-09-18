@@ -306,6 +306,23 @@ export function createStore(config) {
       return db.prepare('SELECT * FROM quota_snapshots WHERE account_id = ? AND captured_at >= ? ORDER BY captured_at')
         .all(accountId, from);
     },
+    modelUsageToday(accountId, from) {
+      const rows = db.prepare('SELECT model, COUNT(*) AS requests, COALESCE(SUM(input_tokens), 0) AS input_tokens, COALESCE(SUM(output_tokens), 0) AS output_tokens, COALESCE(SUM(cached_tokens), 0) AS cached_tokens, COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens FROM request_logs WHERE account_id = ? AND created_at >= ? GROUP BY model ORDER BY (COALESCE(SUM(input_tokens), 0) + COALESCE(SUM(output_tokens), 0)) DESC, model COLLATE NOCASE').all(accountId, from).map((row) => ({
+        modelId: row.model || '', requests: row.requests, inputTokens: row.input_tokens, outputTokens: row.output_tokens, cachedTokens: row.cached_tokens, reasoningTokens: row.reasoning_tokens, totalTokens: row.input_tokens + row.output_tokens,
+      }));
+      return rows.reduce((result, row) => {
+        result.requests += row.requests; result.inputTokens += row.inputTokens; result.outputTokens += row.outputTokens; result.cachedTokens += row.cachedTokens; result.reasoningTokens += row.reasoningTokens; result.totalTokens += row.totalTokens;
+        return result;
+      }, { requests: 0, inputTokens: 0, outputTokens: 0, cachedTokens: 0, reasoningTokens: 0, totalTokens: 0, models: rows });
+    },
+    confirmedCreditsUsedToday(accountId, from) {
+      const baseline = db.prepare('SELECT captured_at, monthly_remaining FROM quota_snapshots WHERE account_id = ? AND captured_at >= ? AND monthly_remaining IS NOT NULL ORDER BY captured_at LIMIT 1').get(accountId, from);
+      const latest = db.prepare('SELECT captured_at, monthly_remaining FROM quota_snapshots WHERE account_id = ? AND captured_at >= ? AND monthly_remaining IS NOT NULL ORDER BY captured_at DESC LIMIT 1').get(accountId, from);
+      if (!baseline || !latest || latest.captured_at <= baseline.captured_at) return { value: null, status: 'unavailable', from: baseline?.captured_at || null, at: latest?.captured_at || null };
+      const delta = baseline.monthly_remaining - latest.monthly_remaining;
+      if (delta < 0) return { value: null, status: 'reset_or_increased', from: baseline.captured_at, at: latest.captured_at };
+      return { value: Math.round(delta * 100) / 100, status: 'measured', from: baseline.captured_at, at: latest.captured_at };
+    },
     addRequestLog(log) {
       db.prepare(`INSERT INTO request_logs
         (account_id,path,model,streaming,status,duration_ms,input_tokens,output_tokens,cached_tokens,reasoning_tokens,error_type,created_at)
