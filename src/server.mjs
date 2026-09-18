@@ -80,6 +80,28 @@ function gatewayAuthenticated(req, store) {
   return Boolean(key) && Boolean(store.authenticateGatewayKey(key));
 }
 
+function normalizeClient(value = '') {
+  const text = String(value).trim().slice(0, 80);
+  const lower = text.toLowerCase();
+  if (!text) return '未知客户端';
+  if (lower.includes('codex')) return 'Codex';
+  if (lower.includes('opencode')) return 'OpenCode';
+  if (lower.includes('claude')) return 'Claude Code';
+  if (lower.includes('openai-python') || lower.includes('openai/')) return 'OpenAI SDK';
+  if (lower.startsWith('curl')) return 'curl';
+  return text;
+}
+
+function requestTools(value) {
+  const tools = value.tools || value.params?.tools || value.input?.tools || [];
+  if (!Array.isArray(tools)) return { count: 0, names: [] };
+  const names = tools
+    .map((tool) => tool?.function?.name || tool?.name || tool?.type)
+    .filter(Boolean)
+    .map((name) => String(name).slice(0, 80));
+  return { count: names.length, names: [...new Set(names)] };
+}
+
 function publicRuntime(startedAt, config, refreshing) {
   return {
     status: 'ok',
@@ -189,17 +211,35 @@ export function createHubApp(config, store, options = {}) {
       return errorJson(res, error.status || 400, error.message, 'invalid_request_error');
     }
 
-    let requestMeta = {};
+    let requestMeta = { client: normalizeClient(req.headers['user-agent']) };
     if (body.length && String(req.headers['content-type'] || '').includes('application/json')) {
       try {
         const parsed = JSON.parse(body.toString('utf8'));
-        requestMeta = { model: String(parsed.model || ''), streaming: parsed.stream === true };
+        const tools = requestTools(parsed);
+        requestMeta = {
+          ...requestMeta,
+          client: normalizeClient(parsed.metadata?.user_agent || parsed.user_agent || parsed.user || req.headers['user-agent']),
+          model: String(parsed.model || ''),
+          streaming: parsed.stream === true,
+          toolCount: tools.count,
+          toolNames: tools.names,
+        };
       } catch {}
     }
 
     const started = Date.now();
     let logged = false;
+    let firstByte = false;
     const parser = createUsageParser();
+    const requestId = crypto.randomUUID();
+    const eventBase = { requestId, accountId: account.id, ...requestMeta };
+    const emitEvent = (event, message, extra = {}) => {
+      try {
+        store.addTerminalEvent({ ...eventBase, event, message, ...extra });
+      } catch (error) {
+        console.error('[terminal]', error);
+      }
+    };
     const finishLog = (status, errorType = '') => {
       if (logged) return;
       logged = true;
@@ -214,6 +254,8 @@ export function createHubApp(config, store, options = {}) {
         errorType: usage.errorType || errorType,
       });
     };
+
+    emitEvent('received', '请求已接收', { status: null });
 
     const headers = stripHopByHop(req.headers);
     delete headers.host;
@@ -235,18 +277,47 @@ export function createHubApp(config, store, options = {}) {
       responseHeaders['access-control-allow-origin'] = '*';
       res.writeHead(upstreamRes.statusCode || 502, responseHeaders);
       const contentType = String(upstreamRes.headers['content-type'] || '');
+      emitEvent('upstream', '上游已建立连接', {
+        status: upstreamRes.statusCode || 502,
+        durationMs: Date.now() - started,
+        detail: contentType || '未知响应类型',
+      });
       upstreamRes.on('data', (chunk) => {
+        if (!firstByte) {
+          firstByte = true;
+          emitEvent('first_byte', '收到首个响应数据', {
+            status: upstreamRes.statusCode || 502,
+            ttftMs: Date.now() - started,
+            detail: contentType.includes('text/event-stream') ? 'SSE 流式传输' : '非流式响应',
+          });
+        }
         parser.push(chunk, contentType);
         if (!res.write(chunk)) upstreamRes.pause();
       });
       res.on('drain', () => upstreamRes.resume());
       upstreamRes.on('end', () => {
         res.end();
-        finishLog(upstreamRes.statusCode || 502);
+        const status = upstreamRes.statusCode || 502;
+        finishLog(status);
+        const usage = parser.finish();
+        const toolNames = [...new Set([...(requestMeta.toolNames || []), ...(usage.toolNames || [])])];
+        const toolCount = Math.max(requestMeta.toolCount || 0, usage.toolCalls || 0);
+        emitEvent('completed', '请求处理完成', {
+          status,
+          durationMs: Date.now() - started,
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          cachedTokens: usage.cachedTokens,
+          reasoningTokens: usage.reasoningTokens,
+          toolCount,
+          toolNames,
+          detail: usage.stopReason || (toolCount ? `${toolCount} 次工具调用：${toolNames.slice(0, 3).join(', ')}` : ''),
+        });
       });
       upstreamRes.on('error', (error) => {
         if (!res.headersSent) errorJson(res, 502, 'Internal proxy stream failed', 'proxy_error');
         else res.destroy(error);
+        emitEvent('error', '上游流传输失败', { level: 'error', status: upstreamRes.statusCode || 502, errorType: 'proxy_stream_error' });
         finishLog(upstreamRes.statusCode || 502, 'proxy_stream_error');
       });
     });
@@ -254,11 +325,13 @@ export function createHubApp(config, store, options = {}) {
     upstream.on('error', (error) => {
       if (!res.headersSent) errorJson(res, 502, 'Internal proxy is unavailable', 'proxy_error');
       else res.destroy(error);
+      emitEvent('error', '内部代理不可用', { level: 'error', status: 502, errorType: 'proxy_error' });
       finishLog(502, 'proxy_error');
     });
     res.once('close', () => {
       if (!res.writableEnded) {
         upstream.destroy();
+        emitEvent('error', '客户端提前断开', { level: 'warn', status: 499, errorType: 'client_disconnected' });
         finishLog(499, 'client_disconnected');
       }
     });
@@ -334,6 +407,34 @@ export function createHubApp(config, store, options = {}) {
         summary: store.requestSummary(from),
         series: store.requestSeries(from, days > 2 ? 86400000 : 3600000),
       });
+    }
+    if (url.pathname === '/api/admin/terminal' && req.method === 'GET') {
+      const days = Math.min(7, Math.max(1, Number(url.searchParams.get('days')) || 1));
+      const from = Date.now() - days * 86400000;
+      return json(res, 200, {
+        events: store.listTerminalEvents({ from, limit: Math.min(500, Number(url.searchParams.get('limit')) || 200) }),
+        stats: store.terminalStats(from),
+      });
+    }
+    if (url.pathname === '/api/admin/terminal/clear' && req.method === 'POST') {
+      store.clearTerminalEvents();
+      return json(res, 200, { cleared: true });
+    }
+    if (url.pathname === '/api/admin/models' && req.method === 'GET') {
+      const account = store.getDefaultAccountWithKey();
+      if (!account) return errorJson(res, 503, 'No enabled default Command Code account', 'account_unavailable');
+      const response = await fetch(`http://${config.internalHost}:${config.internalPort}/v1/models`, {
+        headers: {
+          authorization: `Bearer ${account.apiKey}`,
+          'x-api-key': account.apiKey,
+        },
+        signal: AbortSignal.timeout(12000),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        return errorJson(res, response.status, payload.error?.message || 'Model catalog request failed', 'upstream_error');
+      }
+      return json(res, 200, { models: Array.isArray(payload.data) ? payload.data : [] });
     }
     if (url.pathname === '/api/admin/runtime' && req.method === 'GET') {
       return json(res, 200, publicRuntime(startedAt, config, refreshing));

@@ -66,6 +66,32 @@ export function createStore(config) {
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS request_logs_time ON request_logs(created_at);
+    CREATE TABLE IF NOT EXISTS terminal_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      request_id TEXT NOT NULL,
+      account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
+      client TEXT NOT NULL DEFAULT '',
+      path TEXT NOT NULL DEFAULT '',
+      model TEXT NOT NULL DEFAULT '',
+      streaming INTEGER NOT NULL DEFAULT 0,
+      tool_count INTEGER NOT NULL DEFAULT 0,
+      tool_names TEXT NOT NULL DEFAULT '[]',
+      level TEXT NOT NULL DEFAULT 'info',
+      event TEXT NOT NULL,
+      message TEXT NOT NULL,
+      detail TEXT NOT NULL DEFAULT '',
+      status INTEGER,
+      duration_ms INTEGER,
+      ttft_ms INTEGER,
+      input_tokens INTEGER,
+      output_tokens INTEGER,
+      cached_tokens INTEGER,
+      reasoning_tokens INTEGER,
+      error_type TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS terminal_events_request ON terminal_events(request_id);
+    CREATE INDEX IF NOT EXISTS terminal_events_time ON terminal_events(created_at);
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
@@ -270,6 +296,52 @@ export function createStore(config) {
         FROM request_logs WHERE created_at >= ? GROUP BY CAST(created_at / ? AS INTEGER) ORDER BY time`)
         .all(bucketMs, bucketMs, from, bucketMs);
     },
+    addTerminalEvent(event) {
+      const now = Date.now();
+      db.prepare(`INSERT INTO terminal_events
+        (request_id, account_id, client, path, model, streaming, tool_count, tool_names, level, event, message, detail,
+         status, duration_ms, ttft_ms, input_tokens, output_tokens, cached_tokens, reasoning_tokens, error_type, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+          event.requestId, event.accountId || null, event.client || '', event.path || '', event.model || '',
+          Number(Boolean(event.streaming)), event.toolCount || 0, JSON.stringify(event.toolNames || []),
+          event.level || 'info', event.event, event.message, event.detail || '', event.status ?? null,
+          event.durationMs ?? null, event.ttftMs ?? null, event.inputTokens ?? null, event.outputTokens ?? null,
+          event.cachedTokens ?? null, event.reasoningTokens ?? null, event.errorType || '',
+          event.createdAt || now
+        );
+    },
+    listTerminalEvents({ limit = 200, from = 0 } = {}) {
+      return db.prepare(`SELECT t.*, a.name AS account_name FROM terminal_events t
+        LEFT JOIN accounts a ON a.id = t.account_id
+        WHERE t.created_at >= ? ORDER BY t.id DESC LIMIT ?`).all(from, Math.min(500, limit));
+    },
+    clearTerminalEvents() {
+      db.prepare('DELETE FROM terminal_events').run();
+    },
+    terminalStats(from) {
+      const totals = db.prepare(`WITH recent AS (
+          SELECT * FROM terminal_events WHERE event = 'completed' AND created_at >= ? ORDER BY id DESC LIMIT 75
+        )
+        SELECT COUNT(*) AS total_requests,
+        SUM(CASE WHEN status BETWEEN 200 AND 399 THEN 1 ELSE 0 END) AS successful,
+        COALESCE(SUM(input_tokens),0) AS input_tokens,
+        COALESCE(SUM(cached_tokens),0) AS cached_tokens FROM recent`).get(from);
+      const latest = db.prepare(`SELECT * FROM terminal_events
+        WHERE event = 'completed' AND created_at >= ? ORDER BY id DESC LIMIT 1`).get(from);
+      return {
+        totalRequests: totals.total_requests,
+        successful: totals.successful || 0,
+        inputTokens: totals.input_tokens,
+        cachedTokens: totals.cached_tokens,
+        cacheHitRate: totals.input_tokens ? Math.round(totals.cached_tokens / totals.input_tokens * 1000) / 10 : null,
+        lastLatencyMs: latest?.duration_ms ?? null,
+        lastTtftMs: latest?.ttft_ms ?? null,
+        lastClient: latest?.client || '等待调用',
+        lastModel: latest?.model || '',
+        lastReasoningTokens: latest?.reasoning_tokens ?? null,
+        lastTextTokens: latest ? Math.max(0, (latest.output_tokens || 0) - (latest.reasoning_tokens || 0)) : null,
+      };
+    },
     verifyAdminPassword(password) {
       return verifyPassword(password, getSettingRow('admin_password_hash')?.value);
     },
@@ -334,6 +406,7 @@ export function createStore(config) {
       const now = Date.now();
       db.prepare('DELETE FROM quota_snapshots WHERE captured_at < ?').run(now - config.quotaRetentionDays * 86400000);
       db.prepare('DELETE FROM request_logs WHERE created_at < ?').run(now - config.requestRetentionDays * 86400000);
+      db.prepare('DELETE FROM terminal_events WHERE created_at < ?').run(now - config.requestRetentionDays * 86400000);
     },
     close: () => db.close(),
   };

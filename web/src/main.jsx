@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
-  Activity, Check, ChevronRight, CircleDollarSign, Clock3, Copy, Gauge, KeyRound,
-  LayoutDashboard, LockKeyhole, LogOut, Menu, Plus, RefreshCw, Server,
-  Settings2, ShieldCheck, Trash2, UsersRound, X,
+  Activity, Boxes, Check, ChevronRight, CircleDollarSign, Clock3, Copy, Cpu, Gauge, KeyRound,
+  LayoutDashboard, LockKeyhole, LogOut, Menu, Pause, Play, Plus, RefreshCw, Search, Server,
+  Settings2, ShieldCheck, Timer, Terminal, Trash2, UsersRound, X, Zap,
 } from 'lucide-react';
 import {
   Area, AreaChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip,
@@ -31,6 +31,9 @@ const dateTime = (value) => value ? new Intl.DateTimeFormat('zh-CN', {
 const whole = (value) => Number(value || 0).toLocaleString('zh-CN');
 const duration = (value) => value >= 1000 ? `${(value / 1000).toFixed(1)} 秒` : `${Math.round(value || 0)} 毫秒`;
 const percent = (used, cap) => cap > 0 && used !== null ? Math.min(100, Math.max(0, used / cap * 100)) : null;
+const preciseTime = (value) => new Intl.DateTimeFormat('zh-CN', {
+  month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+}).format(new Date(value));
 
 function Button({ icon: Icon, children, kind = 'secondary', busy, ...props }) {
   return <button className={`button ${kind}`} disabled={busy || props.disabled} {...props}>
@@ -290,6 +293,143 @@ function Requests() {
   </>;
 }
 
+const terminalKind = {
+  received: '请求',
+  upstream: '上游',
+  first_byte: '首字',
+  completed: '完成',
+  error: '错误',
+};
+
+function TerminalPage({ notify }) {
+  const [days, setDays] = useState(1);
+  const [data, setData] = useState(null);
+  const [live, setLive] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState('');
+  const [level, setLevel] = useState('all');
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setBusy(true);
+    try {
+      setData(await api(`/api/admin/terminal?days=${days}&limit=300`));
+    } finally {
+      if (!silent) setBusy(false);
+    }
+  }, [days]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    if (!live) return;
+    const timer = setInterval(() => load(true), 3000);
+    return () => clearInterval(timer);
+  }, [live, load]);
+  const stats = data?.stats || {};
+  const events = (data?.events || []).filter((event) => {
+    if (level === 'issues' && !['error', 'warn'].includes(event.level)) return false;
+    if (level === 'streaming' && !event.streaming) return false;
+    const text = [event.message, event.model, event.client, event.path, event.detail].join(' ').toLowerCase();
+    return text.includes(query.trim().toLowerCase());
+  });
+  async function clearEvents() {
+    await api('/api/admin/terminal/clear', { method: 'POST' });
+    await load(true);
+    notify('终端记录已清空');
+  }
+  return <>
+    <div className="page-heading">
+      <div><p className="eyebrow">实时请求观测</p><h1>终端</h1></div>
+      <div className="actions">
+        <div className="segmented">{[[1, '24 小时'], [3, '3 天'], [7, '7 天']].map(([value, label]) => <button className={days === value ? 'active' : ''} onClick={() => setDays(value)} key={value}>{label}</button>)}</div>
+        <Button icon={live ? Pause : Play} onClick={() => setLive(!live)}>{live ? '暂停' : '继续'}</Button>
+        <Button icon={RefreshCw} busy={busy} onClick={() => load()}>刷新</Button>
+        <Button icon={Trash2} onClick={clearEvents}>清空</Button>
+      </div>
+    </div>
+    <section className="stats-grid terminal-stats">
+      <Stat icon={Terminal} label="最近 75 次请求" value={whole(stats.totalRequests)} detail="已完成" />
+      <Stat icon={Timer} label="末次延迟" value={duration(stats.lastLatencyMs)} detail={stats.lastTtftMs === null || stats.lastTtftMs === undefined ? '无首字数据' : `首字 ${duration(stats.lastTtftMs)}`} />
+      <Stat icon={Zap} label="缓存命中" value={stats.cacheHitRate === null || stats.cacheHitRate === undefined ? '不可用' : `约 ${stats.cacheHitRate}%`} detail={`输入 Token ${whole(stats.inputTokens)}`} />
+      <Stat icon={Cpu} label="客户端" value={stats.lastClient || '等待调用'} detail={stats.lastModel || '暂无模型'} />
+    </section>
+    <div className="terminal-toolbar">
+      <label className="terminal-search">
+        <Search size={16} />
+        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索模型、客户端、路径或事件" />
+      </label>
+      <div className="segmented">{[['all', '全部'], ['streaming', '流式'], ['issues', '异常']].map(([value, label]) => <button className={level === value ? 'active' : ''} onClick={() => setLevel(value)} key={value}>{label}</button>)}</div>
+    </div>
+    <section className="terminal-panel">
+      <div className="terminal-head">
+        <span><i className={live ? 'live-dot' : 'live-dot paused'} />{live ? '实时采集' : '已暂停'}</span>
+        <span>{events.length} 条事件</span>
+      </div>
+      <div className="terminal-log">
+        {events.map((event) => <article className={`terminal-line ${event.level}`} key={event.id}>
+          <span className="terminal-time">{preciseTime(event.created_at)}</span>
+          <span className="terminal-kind">{terminalKind[event.event] || event.event}</span>
+          <div className="terminal-copy">
+            <p>{event.message}</p>
+            <small>{[event.client, event.model, event.path, event.detail].filter(Boolean).join(' · ')}</small>
+          </div>
+          <div className="terminal-metrics">
+            {event.status !== null && event.status !== undefined ? <span>{event.status}</span> : null}
+            {event.ttft_ms !== null && event.ttft_ms !== undefined ? <span>TTFT {duration(event.ttft_ms)}</span> : null}
+            {event.duration_ms !== null && event.duration_ms !== undefined ? <span>{duration(event.duration_ms)}</span> : null}
+            {event.input_tokens || event.output_tokens ? <span>{whole(event.input_tokens)} / {whole(event.output_tokens)}</span> : null}
+            {event.tool_count ? <span>{event.tool_count} 工具</span> : null}
+          </div>
+        </article>)}
+        {!events.length ? <div className="terminal-empty">{live ? '等待实时请求…' : '没有匹配的事件。'}</div> : null}
+      </div>
+    </section>
+  </>;
+}
+
+function ModelsPage({ notify }) {
+  const [models, setModels] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [query, setQuery] = useState('');
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const data = await api('/api/admin/models');
+      setModels(data.models || []);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  const filtered = models.filter((model) => String(model.id || '').toLowerCase().includes(query.trim().toLowerCase()));
+  async function copyModel(id) {
+    await navigator.clipboard.writeText(id);
+    notify('模型 ID 已复制');
+  }
+  return <>
+    <div className="page-heading">
+      <div><p className="eyebrow">上游目录</p><h1>模型库</h1></div>
+      <Button icon={RefreshCw} busy={loading} onClick={load}>刷新目录</Button>
+    </div>
+    <div className="terminal-toolbar">
+      <label className="terminal-search">
+        <Search size={16} />
+        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索模型 ID" />
+      </label>
+      <span>{filtered.length} / {models.length} 个模型</span>
+    </div>
+    {error ? <div className="notice error">{error}</div> : null}
+    {filtered.length ? <div className="model-grid">
+      {filtered.map((model) => <article key={model.id} className="model-card">
+        <div className="model-card-head"><Boxes size={18} /><code>{model.id}</code></div>
+        <div className="model-card-meta"><span>{model.owned_by || '上游模型'}</span><span>{model.object || 'model'}</span></div>
+        <button className="icon-button" title="复制模型 ID" onClick={() => copyModel(model.id)}><Copy size={16} /></button>
+      </article>)}
+    </div> : <Empty>{loading ? '正在读取上游模型…' : '没有匹配模型。'}</Empty>}
+  </>;
+}
+
 function ApiKeyResult({ apiKey, onClose, notify }) {
   if (!apiKey) return null;
   async function copyKey() {
@@ -430,7 +570,7 @@ function App() {
   if (authenticated === null) return <div className="loading"><RefreshCw className="spin" /></div>;
   if (!authenticated) return <Login notice={loginNotice} onLogin={() => { setLoginNotice(''); setAuthenticated(true); }} />;
   const navigation = [
-    ['overview', LayoutDashboard, '总览'], ['accounts', UsersRound, '账号'], ['requests', Activity, '请求'], ['system', Settings2, '系统'],
+    ['overview', LayoutDashboard, '总览'], ['accounts', UsersRound, '账号'], ['requests', Activity, '请求'], ['terminal', Terminal, '终端'], ['models', Boxes, '模型库'], ['system', Settings2, '系统'],
   ];
   async function logout() { await api('/api/admin/logout', { method: 'POST' }); setAuthenticated(false); }
   return <div className="app-shell">
@@ -444,6 +584,8 @@ function App() {
       {page === 'overview' ? <Overview data={overview} reload={loadOverview} busy={busy} /> : null}
       {page === 'accounts' ? <Accounts notify={notify} /> : null}
       {page === 'requests' ? <Requests /> : null}
+      {page === 'terminal' ? <TerminalPage notify={notify} /> : null}
+      {page === 'models' ? <ModelsPage notify={notify} /> : null}
       {page === 'system' ? <SystemPage notify={notify} onPasswordChanged={() => { setLoginNotice('密码已修改，请使用新密码重新登录'); setAuthenticated(false); }} /> : null}
     </main></div>
     {toast ? <div className={`toast ${toast.error ? 'error' : ''}`}>{toast.message}</div> : null}

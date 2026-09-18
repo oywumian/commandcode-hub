@@ -16,6 +16,7 @@ test('gateway validates its key and injects the selected account key', async () 
   });
   const internalPort = await listen(internal);
   const logs = [];
+  const terminalEvents = [];
   const store = {
     getSessionVersion: () => 1,
     verifyAdminPassword: (value) => value === 'admin',
@@ -23,6 +24,10 @@ test('gateway validates its key and injects the selected account key', async () 
     authenticateGatewayKey: (value) => value === 'gateway-secret' ? { id: 'gateway-1' } : null,
     getDefaultAccountWithKey: () => ({ id: 'account-1', apiKey: 'user_real_key' }),
     addRequestLog: (log) => logs.push(log),
+    addTerminalEvent: (event) => terminalEvents.push(event),
+    listTerminalEvents: ({ limit } = {}) => terminalEvents.slice(0, limit),
+    clearTerminalEvents: () => { terminalEvents.length = 0; },
+    terminalStats: () => ({ totalRequests: 1, cacheHitRate: 0, lastLatencyMs: 10, lastTtftMs: 3, lastClient: 'Codex', lastModel: 'test-model' }),
   };
   const config = {
     gatewayApiKey: 'gateway-secret', internalHost: '127.0.0.1', internalPort,
@@ -45,6 +50,22 @@ test('gateway validates its key and injects the selected account key', async () 
     assert.equal(upstreamHeaders['x-api-key'], 'user_real_key');
     assert.equal(logs[0].model, 'test-model');
     assert.equal(logs[0].inputTokens, 2);
+    assert.equal(terminalEvents.map((event) => event.event).join(','), 'received,upstream,first_byte,completed');
+    assert.equal(terminalEvents.at(-1).inputTokens, 2);
+    assert.equal(terminalEvents.at(-1).outputTokens, 1);
+
+    const login = await fetch(`http://127.0.0.1:${gatewayPort}/api/admin/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'admin' }),
+    });
+    const cookie = login.headers.get('set-cookie').split(';')[0];
+    const terminal = await fetch(`http://127.0.0.1:${gatewayPort}/api/admin/terminal`, { headers: { Cookie: cookie } });
+    const terminalData = await terminal.json();
+    assert.equal(terminal.status, 200);
+    assert.equal(terminalData.events.at(-1).event, 'completed');
+    assert.equal(terminalData.stats.lastModel, 'test-model');
+    const cleared = await fetch(`http://127.0.0.1:${gatewayPort}/api/admin/terminal/clear`, { method: 'POST', headers: { Cookie: cookie } });
+    assert.equal(cleared.status, 200);
+    assert.equal(terminalEvents.length, 0);
   } finally {
     await close(gateway);
     await close(internal);

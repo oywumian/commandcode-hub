@@ -18,6 +18,38 @@ function inspectObject(target, value) {
 
 export function createUsageParser() {
   const usage = { inputTokens: 0, outputTokens: 0, cachedTokens: 0, reasoningTokens: 0, errorType: '' };
+  const toolCallKeys = new Set();
+  const toolNames = new Set();
+  let stopReason = '';
+
+  function observeToolCall(call) {
+    if (!call || typeof call !== 'object') return;
+    const id = call.id ?? call.toolCallId ?? call.index;
+    const name = call.function?.name || call.toolName || call.name || '';
+    const key = String(id ?? `${toolCallKeys.size}:${name}`);
+    if (!toolCallKeys.has(key)) {
+      toolCallKeys.add(key);
+      if (name) toolNames.add(String(name).slice(0, 80));
+    }
+  }
+
+  function observeTools(value) {
+    for (const choice of value.choices || []) {
+      const calls = choice.delta?.tool_calls || choice.message?.tool_calls || [];
+      for (const call of calls) observeToolCall(call);
+      if (choice.finish_reason) stopReason = String(choice.finish_reason).slice(0, 40);
+    }
+    if (value.type === 'content_block_start' && value.content_block?.type === 'tool_use') {
+      observeToolCall(value.content_block);
+    }
+    if (value.type === 'tool-call') {
+      observeToolCall(value);
+    }
+    if (value.type === 'response.output_item.added' && value.item?.type === 'function_call') {
+      observeToolCall(value.item);
+    }
+    if (value.stop_reason) stopReason = String(value.stop_reason).slice(0, 40);
+  }
   let lineBuffer = '';
   let bodyBuffer = '';
 
@@ -32,7 +64,11 @@ export function createUsageParser() {
           if (!line.startsWith('data:')) continue;
           const data = line.slice(5).trim();
           if (!data || data === '[DONE]') continue;
-          try { inspectObject(usage, JSON.parse(data)); } catch {}
+          try {
+            const value = JSON.parse(data);
+            inspectObject(usage, value);
+            observeTools(value);
+          } catch {}
         }
       } else if (bodyBuffer.length < 2_000_000) {
         bodyBuffer += text;
@@ -40,12 +76,20 @@ export function createUsageParser() {
     },
     finish() {
       if (lineBuffer.startsWith('data:')) {
-        try { inspectObject(usage, JSON.parse(lineBuffer.slice(5).trim())); } catch {}
+        try {
+          const value = JSON.parse(lineBuffer.slice(5).trim());
+          inspectObject(usage, value);
+          observeTools(value);
+        } catch {}
       }
       if (bodyBuffer) {
-        try { inspectObject(usage, JSON.parse(bodyBuffer)); } catch {}
+        try {
+          const value = JSON.parse(bodyBuffer);
+          inspectObject(usage, value);
+          observeTools(value);
+        } catch {}
       }
-      return usage;
+      return { ...usage, stopReason, toolCalls: toolCallKeys.size, toolNames: [...toolNames] };
     },
   };
 }
