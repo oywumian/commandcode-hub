@@ -588,7 +588,7 @@ function ModelsPage({ notify }) {
     return lines.join('\n');
   }
 
-    function PricingCell({ pricing }) {
+  function PricingCell({ pricing }) {
     if (!pricing) return <span className="model-price-empty">—</span>;
     const tags = [];
     if (pricing.discountPercent) tags.push(`-${pricing.discountPercent}%`);
@@ -597,12 +597,12 @@ function ModelsPage({ notify }) {
       <strong>{pricing.free ? '免费' : `${rate(pricing.input)} / ${rate(pricing.output)}`}</strong>
       <small>{pricing.free ? 'Go 套餐' : `缓存读 ${rate(pricing.cacheRead)}`}{tags.length ? ` · ${tags.join(' · ')}` : ''}</small>
     </div>;
-    }
+  }
 
-    function UsageCreditsCell({ usageItem }) {
-      if (!usageItem || usageItem.estimatedCredits === null || usageItem.estimatedCredits === undefined) return <span className="model-price-empty">—</span>;
-      return <span className="model-credits" title="按 Go 官方参考价估算；普通输入、输出和缓存读 Token 分别计价，实际扣费以 Command Code Studio 为准。">{credits(usageItem.estimatedCredits)}</span>;
-    }
+  function UsageCreditsCell({ usageItem }) {
+    if (!usageItem || usageItem.estimatedCredits === null || usageItem.estimatedCredits === undefined) return <span className="model-price-empty">—</span>;
+    return <span className="model-credits" title="按 Go 官方参考价估算；普通输入、输出和缓存读 Token 分别计价，实际扣费以 Command Code Studio 为准。">{credits(usageItem.estimatedCredits)}</span>;
+  }
 
   return <>
     <div className="page-heading">
