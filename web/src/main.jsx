@@ -129,7 +129,17 @@ function CommandMark() {
 
 function Overview({ data, reload, busy }) {
   const account = data?.defaultAccount;
-  const quota = account?.quota;
+  const activeAccounts = (data?.accounts || []).filter((item) => item.enabled && item.quota);
+  const quota = activeAccounts.length ? {
+    credits: {
+      fiveHour: aggregateWindow(activeAccounts, 'fiveHour'),
+      weekly: aggregateWindow(activeAccounts, 'weekly'),
+      monthlyCredits: sumQuota(activeAccounts, (item) => item.quota.credits?.monthlyCredits),
+      purchasedCredits: sumQuota(activeAccounts, (item) => item.quota.credits?.purchasedCredits),
+      freeCredits: sumQuota(activeAccounts, (item) => item.quota.credits?.freeCredits),
+    },
+    monthly: aggregateMonthly(activeAccounts),
+  } : null;
   const summary = data?.requestSummary || {};
   const success = summary.total ? summary.successful / summary.total * 100 : 0;
   const quotaChart = (data?.quotaHistory || []).map((row) => ({
@@ -154,9 +164,9 @@ function Overview({ data, reload, busy }) {
       <Stat icon={Gauge} label="平均耗时" value={duration(summary.avg_duration_ms)} detail="最近 24 小时" />
       <Stat icon={CircleDollarSign} label="Token" value={whole((summary.input_tokens || 0) + (summary.output_tokens || 0))} detail={`缓存 ${whole(summary.cached_tokens)}`} />
     </section>
-    {!account ? <Empty>请先在“账号”中添加并选择默认账号。</Empty> : <>
+    {!quota ? <Empty>请先在“账号”中添加并获取额度。</Empty> : <>
       <section className="section-block">
-        <div className="section-title"><div><h2>{account.name}</h2><p>{account.planName || '套餐不可用'} · 更新于 {dateTime(account.lastQuotaAt)}</p></div><span className="status-dot">默认账号</span></div>
+        <div className="section-title"><div><h2>全部已启用账号</h2><p>{activeAccounts.length} 个账号合计 · 更新于 {dateTime(Math.max(...activeAccounts.map((item) => item.lastQuotaAt || 0)))}</p></div><span className="status-dot">额度合计</span></div>
         <div className="quota-grid">
           <QuotaMeter label="5 小时额度" value={quota?.credits?.fiveHour?.used ?? null} cap={quota?.credits?.fiveHour?.cap ?? null} resetAt={quota?.credits?.fiveHour?.resetAt} />
           <QuotaMeter label="每周额度" value={quota?.credits?.weekly?.used ?? null} cap={quota?.credits?.weekly?.cap ?? null} resetAt={quota?.credits?.weekly?.resetAt} />
@@ -172,7 +182,7 @@ function Overview({ data, reload, busy }) {
     </>}
     <section className="chart-grid">
       <div className="chart-panel">
-        <div className="section-title"><div><h2>额度趋势</h2><p>最近 30 天</p></div></div>
+        <div className="section-title"><div><h2>默认账号额度趋势</h2><p>最近 30 天</p></div></div>
         {quotaChart.length ? <ResponsiveContainer width="100%" height={260}>
           <LineChart data={quotaChart}><CartesianGrid stroke="rgba(0, 0, 0, .06)" vertical={false} /><XAxis dataKey="time" minTickGap={36} /><YAxis /><Tooltip /><Line type="monotone" dataKey="fiveHour" name="5 小时" stroke="#0071e3" dot={false} strokeWidth={2} /><Line type="monotone" dataKey="weekly" name="每周" stroke="#86868b" dot={false} strokeWidth={2} /></LineChart>
         </ResponsiveContainer> : <Empty>还没有额度快照。</Empty>}
@@ -185,6 +195,37 @@ function Overview({ data, reload, busy }) {
       </div>
     </section>
   </>;
+}
+
+function sumQuota(accounts, read) {
+  const values = accounts.map(read).filter((value) => Number.isFinite(Number(value))).map(Number);
+  return values.length ? values.reduce((total, value) => total + value, 0) : null;
+}
+
+function aggregateWindow(accounts, key) {
+  const windows = accounts.map((item) => item.quota?.credits?.[key]).filter(Boolean);
+  const used = sumQuota(windows, (item) => item.used);
+  const cap = sumQuota(windows, (item) => item.cap);
+  return {
+    used,
+    cap,
+    exceeded: windows.some((item) => item.exceeded),
+    resetAt: null,
+  };
+}
+
+function aggregateMonthly(accounts) {
+  const monthly = accounts.map((item) => item.quota?.monthly).filter(Boolean);
+  const used = sumQuota(monthly, (item) => item.used);
+  const cap = sumQuota(monthly, (item) => item.cap);
+  const remaining = sumQuota(monthly, (item) => item.remaining);
+  return {
+    used,
+    cap,
+    remaining,
+    resetAt: null,
+    estimated: monthly.some((item) => item.estimated),
+  };
 }
 
 function AccountDialog({ open, onClose, onSaved }) {
