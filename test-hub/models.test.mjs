@@ -43,3 +43,45 @@ test('admin models proxy returns only the upstream model catalog', async () => {
     await close(internal);
   }
 });
+
+test('admin models proxy reads the selected account catalog', async () => {
+  let requestedAuth = '';
+  const internal = http.createServer((req, res) => {
+    requestedAuth = req.headers.authorization;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ object: 'list', data: [
+      { id: 'Kimi-K3', object: 'model', owned_by: 'command-code' },
+    ] }));
+  });
+  const internalPort = await listen(internal);
+  const store = {
+    getSessionVersion: () => 1,
+    verifyAdminPassword: (value) => value === 'admin',
+    getDefaultAccountWithKey: () => ({ id: 'account-1', name: 'Default', apiKey: 'user_default_key' }),
+    getAccountWithKey: (id) => id === 'account-2'
+      ? { id: 'account-2', name: 'Second', enabled: true, isDefault: false, apiKey: 'user_second_key' }
+      : null,
+  };
+  const config = {
+    internalHost: '127.0.0.1', internalPort, maxBodyBytes: 1024 * 1024, production: false,
+    adminPassword: 'admin', sessionSecret: 'session',
+  };
+  const app = createHubApp(config, store, { distDir: 'missing' });
+  const server = http.createServer(app.handler);
+  const port = await listen(server);
+  try {
+    const login = await fetch(`http://127.0.0.1:${port}/api/admin/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'admin' }),
+    });
+    const cookie = login.headers.get('set-cookie').split(';')[0];
+    const response = await fetch(`http://127.0.0.1:${port}/api/admin/models?accountId=account-2`, { headers: { Cookie: cookie } });
+    const data = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(requestedAuth, 'Bearer user_second_key');
+    assert.equal(data.account.id, 'account-2');
+    assert.deepEqual(data.models, [{ id: 'Kimi-K3', object: 'model', owned_by: 'command-code' }]);
+  } finally {
+    await close(server);
+    await close(internal);
+  }
+});

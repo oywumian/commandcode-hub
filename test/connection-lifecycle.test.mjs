@@ -103,6 +103,11 @@ async function startStallingUpstream() {
     req.on('data', () => {});
     req.on('end', () => {
       if (req.url !== '/alpha/generate') {
+        if (req.url === '/provider/v1/models') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ object: 'list', data: [{ id: 'm', object: 'model' }] }));
+          return;
+        }
         // 预请求（fingerprint / lifecycle）必须正常应答，否则代理会卡在初始化上
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end('{}');

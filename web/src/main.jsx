@@ -29,6 +29,7 @@ const dateTime = (value) => value ? new Intl.DateTimeFormat('zh-CN', {
   month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
 }).format(new Date(value)) : '不可用';
 const whole = (value) => Number(value || 0).toLocaleString('zh-CN');
+const decimal = (value) => value === null || value === undefined || value === '' ? '不可用' : Number(value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const duration = (value) => value >= 1000 ? `${(value / 1000).toFixed(1)} 秒` : `${Math.round(value || 0)} 毫秒`;
 const percent = (used, cap) => cap > 0 && used !== null ? Math.min(100, Math.max(0, used / cap * 100)) : null;
 const preciseTime = (value) => new Intl.DateTimeFormat('zh-CN', {
@@ -56,7 +57,7 @@ function QuotaMeter({ label, value, cap, remaining, resetAt, estimated }) {
     </div>
     <div className="meter"><i style={{ width: `${ratio ?? 0}%` }} /></div>
     <div className="quota-foot">
-      <span>{ratio === null ? '无百分比' : `${ratio.toFixed(1)}%`}</span>
+      <span>{ratio === null ? '无百分比' : `${ratio.toFixed(2)}%`}</span>
       <span>{resetAt ? `重置 ${dateTime(resetAt)}` : '无重置时间'}</span>
     </div>
   </article>;
@@ -72,7 +73,7 @@ function AccountQuotaMeter({ label, used, cap, resetAt, estimated }) {
     </div>
     <div className="account-meter-track"><i className={tone} style={{ width: `${ratio ?? 0}%` }} /></div>
     <div className="account-meter-foot">
-      <span>{used === null || cap === null ? '额度不可用' : `已用 ${used.toFixed(2)} / ${cap.toFixed(2)}`}</span>
+      <span>{used === null || cap === null ? '额度不可用' : `已用 ${decimal(used)} / ${decimal(cap)}`}</span>
       <span>{resetAt ? `重置 ${dateTime(resetAt)}` : '暂无重置点'}</span>
     </div>
   </div>;
@@ -155,9 +156,9 @@ function Overview({ data, reload, busy }) {
           <QuotaMeter label="每月额度" value={quota?.monthly?.used ?? null} cap={quota?.monthly?.cap ?? null} remaining={quota?.monthly?.remaining ?? null} resetAt={quota?.monthly?.resetAt} estimated={quota?.monthly?.estimated} />
         </div>
         <div className="credit-strip">
-          <span>月度余额 <strong>{quota?.credits?.monthlyCredits ?? '不可用'}</strong></span>
-          <span>购买额度 <strong>{quota?.credits?.purchasedCredits ?? '不可用'}</strong></span>
-          <span>免费额度 <strong>{quota?.credits?.freeCredits ?? '不可用'}</strong></span>
+          <span>月度余额 <strong>{decimal(quota?.credits?.monthlyCredits)}</strong></span>
+          <span>购买额度 <strong>{decimal(quota?.credits?.purchasedCredits)}</strong></span>
+          <span>免费额度 <strong>{decimal(quota?.credits?.freeCredits)}</strong></span>
         </div>
       </section>
       {account.lastError ? <div className="notice error">{account.lastError}</div> : null}
@@ -231,6 +232,7 @@ function Accounts({ notify }) {
         const monthlyUsed = monthly?.used ?? (monthly?.cap !== null && monthly?.cap !== undefined && credits?.monthlyCredits !== null && credits?.monthlyCredits !== undefined
           ? Math.max(0, monthly.cap - credits.monthlyCredits)
           : null);
+        const monthlyBalance = monthly?.remaining ?? credits?.monthlyCredits ?? null;
         const status = account.lastError ? { label: '异常', className: 'error' } : account.quota ? { label: '正常', className: 'ok' } : { label: '未获取', className: 'muted' };
         return <article key={account.id} className={`account-card ${account.enabled ? '' : 'off'}`}>
           <header className="account-card-head">
@@ -243,9 +245,10 @@ function Accounts({ notify }) {
             <span className={`status-pill ${account.enabled ? 'ok' : 'muted'}`}>{account.enabled ? '已启用' : '已停用'}</span>
           </div>
           <div className="account-credits">
-            <span>月度已用<strong>{monthlyUsed ?? '不可用'}</strong></span>
-            <span>购买额度<strong>{credits?.purchasedCredits ?? '不可用'}</strong></span>
-            <span>免费额度<strong>{credits?.freeCredits ?? '不可用'}</strong></span>
+            <span>月度已用<strong>{decimal(monthlyUsed)}</strong></span>
+            <span>月度余额<strong>{decimal(monthlyBalance)}</strong></span>
+            <span>购买额度<strong>{decimal(credits?.purchasedCredits)}</strong></span>
+            <span>免费额度<strong>{decimal(credits?.freeCredits)}</strong></span>
           </div>
           <div className="account-meters">
             <AccountQuotaMeter label="5 小时滚动" used={credits?.fiveHour?.used ?? null} cap={credits?.fiveHour?.cap ?? null} resetAt={credits?.fiveHour?.resetAt} />
@@ -385,40 +388,77 @@ function TerminalPage({ notify }) {
 }
 
 function ModelsPage({ notify }) {
+  const [accounts, setAccounts] = useState([]);
+  const [accountId, setAccountId] = useState('');
   const [models, setModels] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
-  const load = useCallback(async () => {
+
+  const loadAccounts = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const data = await api('/api/admin/models');
+      const data = await api('/api/admin/accounts');
+      const next = data.accounts || [];
+      setAccounts(next);
+      setAccountId((current) => next.some((account) => account.id === current)
+        ? current
+        : (next.find((account) => account.isDefault)?.id || next[0]?.id || ''));
+      if (!next.length) setLoading(false);
+    } catch (err) {
+      setError(err.message);
+      setLoading(false);
+    }
+  }, []);
+
+  const load = useCallback(async () => {
+    if (!accountId) {
+      setModels([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError('');
+    try {
+      const data = await api(`/api/admin/models?accountId=${encodeURIComponent(accountId)}`);
       setModels(data.models || []);
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [accountId]);
+
+  useEffect(() => { loadAccounts(); }, [loadAccounts]);
   useEffect(() => { load(); }, [load]);
+
+  const selectedAccount = accounts.find((account) => account.id === accountId) || null;
   const filtered = models.filter((model) => String(model.id || '').toLowerCase().includes(query.trim().toLowerCase()));
   async function copyModel(id) {
     await navigator.clipboard.writeText(id);
     notify('模型 ID 已复制');
   }
+
   return <>
     <div className="page-heading">
-      <div><p className="eyebrow">上游目录</p><h1>模型库</h1></div>
+      <div><p className="eyebrow">账号权限目录</p><h1>模型库</h1></div>
       <Button icon={RefreshCw} busy={loading} onClick={load}>刷新目录</Button>
     </div>
-    <div className="terminal-toolbar">
+    <div className="terminal-toolbar model-toolbar">
+      <label className="model-account">账号
+        <select value={accountId} onChange={(event) => setAccountId(event.target.value)} disabled={!accounts.length}>
+          {!accounts.length ? <option value="">暂无账号</option> : null}
+          {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}{account.isDefault ? '（默认）' : ''}</option>)}
+        </select>
+      </label>
       <label className="terminal-search">
         <Search size={16} />
         <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索模型 ID" />
       </label>
       <span>{filtered.length} / {models.length} 个模型</span>
     </div>
+    {selectedAccount ? <p className="model-account-note">仅显示「{selectedAccount.name}」当前可使用的模型；品牌前缀已隐藏。</p> : null}
     {error ? <div className="notice error">{error}</div> : null}
     {filtered.length ? <div className="model-grid">
       {filtered.map((model) => <article key={model.id} className="model-card">
@@ -426,7 +466,7 @@ function ModelsPage({ notify }) {
         <div className="model-card-meta"><span>{model.owned_by || '上游模型'}</span><span>{model.object || 'model'}</span></div>
         <button className="icon-button" title="复制模型 ID" onClick={() => copyModel(model.id)}><Copy size={16} /></button>
       </article>)}
-    </div> : <Empty>{loading ? '正在读取上游模型…' : '没有匹配模型。'}</Empty>}
+    </div> : <Empty>{loading ? '正在读取该账号的模型…' : accounts.length ? '没有匹配模型。' : '请先添加 Command Code 账号。'}</Empty>}
   </>;
 }
 

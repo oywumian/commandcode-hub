@@ -65,6 +65,13 @@ export async function startMockUpstream(opts = {}) {
       seen.push({ url: req.url, method: req.method, headers: req.headers, raw });
       if (opts.onRequest) await opts.onRequest(req, res, seen[seen.length - 1]);
       if (res.writableEnded) return;
+      if (req.url === '/provider/v1/models') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ object: 'list', data: opts.models || [
+          { id: 'm', object: 'model', owned_by: 'test' },
+        ] }));
+        return;
+      }
       const status = opts.status ?? 200;
       if (status !== 200) {
         res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -100,6 +107,7 @@ export async function startProxy({ upstreamPort, env = {}, cwd } = {}) {
   const ownWorkdir = cwd === undefined;
   const workdir = cwd ?? mkdtempSync(join(tmpdir(), 'ccp-test-'));
   copyFileSync(join(REPO, 'proxy.mjs'), join(workdir, 'proxy.mjs'));
+  copyFileSync(join(REPO, 'model-catalog.mjs'), join(workdir, 'model-catalog.mjs'));
   if (!existsSync(join(workdir, 'config.json'))) {
     copyFileSync(join(REPO, 'config.json'), join(workdir, 'config.json'));
   }
@@ -107,7 +115,7 @@ export async function startProxy({ upstreamPort, env = {}, cwd } = {}) {
     cwd: workdir,
     env: { ...process.env, PORT: String(port), HOST: '127.0.0.1',
       CC_API_BASE: 'http://127.0.0.1:' + upstreamPort,
-      CC_USE_PROVIDER_MODELS: 'false',   // 不访问 /provider/v1/models
+      CC_USE_PROVIDER_MODELS: 'true',
       ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

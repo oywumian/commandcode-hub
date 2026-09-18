@@ -25,7 +25,7 @@ API Key 通过 `Authorization` 请求头（Anthropic SDK 可用 `x-api-key`）�
 curl http://127.0.0.1:3050/v1/chat/completions \
   -H "Authorization: Bearer user_xxxxxxxxx" \
   -H "Content-Type: application/json" \
-  -d '{"model":"deepseek/deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}'
+  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}'
 ```
 
 ## 文件结构
@@ -60,8 +60,8 @@ commandcode/
 | `apiKey` | `""` | 可选兜底 API Key（请求也可通过 header 传入） |
 | `logFile` | `""` | 日志文件路径（空=仅控制台） |
 | `logLevel` | `info` | 日志级别 |
-| `useProviderModels` | `true` | 从 Provider API 动态拉取模型列表 |
-| `modelRefreshIntervalMs` | `300000` | 模型列表缓存刷新间隔（5min） |
+| `useProviderModels` | `true` | 按账号从 Provider API 拉取该账号可用模型；不再使用全局硬编码兜底 |
+| `modelRefreshIntervalMs` | `300000` | 每个账号的模型目录与别名缓存刷新间隔（5min） |
 | `zdr` | `false` | 请求 Command Code 使用 ZDR-only 路由 |
 | `cliMode` | `agent` | 信封 `mode`。上游枚举：`agent` / `learning` / `custom-agent` / `custom-agent-create` / `title-gen` / `tool-desc` / `compact` / `vision` |
 | `cliSessionMode` | `interactive` | lifecycle 元数据里的 `mode`（**另一个枚举**：`interactive` / `non-interactive`）|
@@ -78,7 +78,7 @@ commandcode/
 | `CC_API_BASE` | `https://api.commandcode.ai` | 上游地址 → `apiBase` |
 | `PROJECT_SLUG` | `cc-proxy` | `x-project-slug` → `projectSlug` |
 | `LOG_FILE` | 空 | 日志文件 → `logFile`（**同步写**，见[其它注意事项](#其它注意事项)）|
-| `CC_USE_PROVIDER_MODELS` | `true` | 动态拉取模型列表 → `useProviderModels` |
+| `CC_USE_PROVIDER_MODELS` | `true` | 按账号拉取模型目录 → `useProviderModels` |
 | `CMD_ZDR` | 关 | `1` 开启 ZDR-only 路由 → `zdr` |
 | `CC_CLI_MODE` | `agent` | 信封 `mode` → `cliMode` |
 | `CC_CLI_SESSION_MODE` | `interactive` | lifecycle 元数据的 `mode` → `cliSessionMode` |
@@ -123,7 +123,7 @@ OpenAI Chat Completions 兼容。支持流式和非流式、工具调用、多�
 **简单请求：**
 ```json
 {
-  "model": "deepseek/deepseek-v4-flash",
+  "model": "deepseek-v4-flash",
   "messages": [{ "role": "user", "content": "hello" }],
   "stream": true
 }
@@ -132,7 +132,7 @@ OpenAI Chat Completions 兼容。支持流式和非流式、工具调用、多�
 **多模态图片输入（需 vision 模型）：**
 ```json
 {
-  "model": "xiaomi/mimo-v2.5",
+  "model": "mimo-v2.5",
   "messages": [{
     "role": "user",
     "content": [
@@ -146,7 +146,7 @@ OpenAI Chat Completions 兼容。支持流式和非流式、工具调用、多�
 **工具调用：**
 ```json
 {
-  "model": "deepseek/deepseek-v4-flash",
+  "model": "deepseek-v4-flash",
   "messages": [...],
   "tools": [{
     "type": "function",
@@ -173,7 +173,7 @@ data: [DONE]
   "id": "chatcmpl-xxx",
   "object": "chat.completion",
   "created": 1234567890,
-  "model": "deepseek/deepseek-v4-flash",
+  "model": "deepseek-v4-flash",
   "choices": [{
     "index": 0,
     "message": {
@@ -249,7 +249,7 @@ data: {"type":"message_stop"}
   "id": "msg_xxx",
   "type": "message",
   "role": "assistant",
-  "model": "deepseek/deepseek-v4-flash",
+  "model": "deepseek-v4-flash",
   "content": [{ "type": "text", "text": "Hello!" }],
   "stop_reason": "end_turn",
   "stop_sequence": null,
@@ -276,12 +276,12 @@ OpenAI **Responses API**（Codex、以及新版 OpenAI SDK 用的那套）。
 ```bash
 curl http://127.0.0.1:3050/v1/responses \
   -H "Authorization: Bearer user_xxxxxxxxx" -H "Content-Type: application/json" \
-  -d '{"model":"deepseek/deepseek-v4-flash","input":[{"role":"user","content":[{"type":"input_text","text":"hi"}]}]}'
+  -d '{"model":"deepseek-v4-flash","input":[{"role":"user","content":[{"type":"input_text","text":"hi"}]}]}'
 ```
 
 ### `GET /v1/models`
 
-返回可用模型列表。优先从 Provider API 动态拉取（5min 缓存），失败回退硬编码列表。
+返回当前账号可用的模型短名称列表。代理按账号独立缓存 Provider API 目录（默认 5min），不会把其他账号的模型混入；上游不可用但已有该账号旧缓存时使用旧缓存，否则返回错误而不是全局兜底列表。
 
 ### `GET /health`
 
@@ -315,7 +315,9 @@ curl http://127.0.0.1:3050/v1/responses \
 
 ## 模型列表
 
-代理访问 `GET /v1/models` 会返回实时模型列表。以下为常见模型参考，完整列表以实际接口返回为准——各模型套餐可参考 [Command Code Pricing](https://commandcode.ai/docs/resources/pricing-limits)。
+代理访问 `GET /v1/models` 会返回**当前账号**可用的模型短名称。上游返回的 `deepseek/deepseek-v4-pro` 这类 ID 会在客户端展示和调用时去掉品牌前缀，变成 `deepseek-v4-pro`；代理内部维护“短名称 → 上游模型 ID”的别名映射，转发时自动还原。
+
+不同 Command Code 套餐和账号的目录会分别获取，互不混用。完整列表以实际接口返回为准，套餐权限可参考 [Command Code Pricing](https://commandcode.ai/docs/resources/pricing-limits)。
 
 ### 常用模型
 
@@ -323,16 +325,16 @@ curl http://127.0.0.1:3050/v1/responses \
 |---------|--------|
 | `claude-sonnet-4-6` / `claude-opus-4-8` / `claude-opus-4-7` / `claude-haiku-4-5-20251001` | Anthropic |
 | `gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini` / `gpt-5.3-codex` | OpenAI |
-| `deepseek/deepseek-v4-pro` / `deepseek/deepseek-v4-flash` | DeepSeek |
-| `moonshotai/Kimi-K2.6` / `moonshotai/Kimi-K2.5` | Kimi |
-| `zai-org/GLM-5.1` / `zai-org/GLM-5` | GLM |
-| `MiniMaxAI/MiniMax-M3` / `MiniMaxAI/MiniMax-M2.7` / `MiniMaxAI/MiniMax-M2.5` | MiniMax |
-| `Qwen/Qwen3.7-Max` / `Qwen/Qwen3.6-Max-Preview` / `Qwen/Qwen3.6-Plus` | Qwen |
-| `stepfun/Step-3.7-Flash` / `stepfun/Step-3.5-Flash` | Step |
-| `xiaomi/mimo-v2.5-pro` / `xiaomi/mimo-v2.5` | Xiaomi（**支持图片输入**） |
-| `google/gemini-3.5-flash` / `google/gemini-3.1-flash-lite` | Gemini |
+| `deepseek-v4-pro` / `deepseek-v4-flash` | DeepSeek |
+| `Kimi-K2.6` / `Kimi-K2.5` | Kimi |
+| `GLM-5.1` / `GLM-5` | GLM |
+| `MiniMax-M3` / `MiniMax-M2.7` / `MiniMax-M2.5` | MiniMax |
+| `Qwen3.7-Max` / `Qwen3.6-Max-Preview` / `Qwen3.6-Plus` | Qwen |
+| `Step-3.7-Flash` / `Step-3.5-Flash` | Step |
+| `mimo-v2.5-pro` / `mimo-v2.5` | Xiaomi（**支持图片输入**） |
+| `gemini-3.5-flash` / `gemini-3.1-flash-lite` | Gemini |
 
-> ⚠️ 部分模型（如 `deepseek-v4-flash`、`claude-sonnet-4-6`）不支持图片输入。如需多模态请用 `xiaomi/mimo-v2.5`、`Kimi-K2.5` 等 vision 模型。
+> ⚠️ 部分模型（如 `deepseek-v4-flash`、`claude-sonnet-4-6`）不支持图片输入。如需多模态请用 `mimo-v2.5`、`Kimi-K2.5` 等 vision 模型。
 
 ## 接入示例
 
@@ -346,7 +348,7 @@ client = OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="deepseek/deepseek-v4-flash",
+    model="deepseek-v4-flash",
     messages=[{"role": "user", "content": "hello"}],
     stream=True,
 )
@@ -360,7 +362,7 @@ curl http://127.0.0.1:3050/v1/chat/completions \
   -H "Authorization: Bearer user_xxxxxxxxx" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "deepseek/deepseek-v4-flash",
+    "model": "deepseek-v4-flash",
     "messages": [{"role": "user", "content": "hello"}],
     "stream": true
   }'
@@ -381,7 +383,7 @@ client = anthropic.Anthropic(
     base_url="http://127.0.0.1:3050",
 )
 message = client.messages.create(
-    model="deepseek/deepseek-v4-flash",
+    model="deepseek-v4-flash",
     max_tokens=1000,
     system="You are helpful.",
     messages=[{"role": "user", "content": "hello"}],
@@ -455,6 +457,8 @@ Anthropic SDK 通过 `x-api-key` 头鉴权——代理已原生支持（无需 `
 ```
 
 `config.environment` / `config.workingDir` 都取自 `DEVICE_PROFILE`（不是宿主真实值），`skills` 发 `null`（不是空串）。
+
+这里的 `params.model` 是代理完成别名解析后发给上游的原始模型 ID；客户端请求 `/v1/chat/completions`、`/v1/messages`、`/v1/responses` 时应使用去掉品牌前缀的短名称。
 
 条件字段：`system`（从 system 消息提取）、`temperature`、`reasoning_effort`、`tools`（映射为 CC `input_schema` 格式）、`tool_choice`、`parallel_tool_calls`。给了 `prompt_cache_key`（或客户端自带 `cache_control` 断点）时，断点会落在 system 的最后一块上 —— 缓存按前缀计，system 正是最前那段前缀。
 

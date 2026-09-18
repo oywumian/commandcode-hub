@@ -117,7 +117,7 @@ aside nav button.active { color: var(--accent); background: var(--accent-soft); 
 .status-pill.muted { background: rgba(0, 0, 0, .05); color: var(--secondary); }
 .account-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 18px 0; }
 .plan-pill { display: inline-flex; align-items: center; min-height: 25px; max-width: 100%; padding: 0 10px; border-radius: 999px; background: var(--surface-muted); color: var(--text); font-size: 11px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.account-credits { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 20px; }
+.account-credits { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 20px; }
 .account-credits span { min-width: 0; display: grid; gap: 5px; padding: 11px 12px; border-radius: 10px; background: var(--surface-muted); color: var(--secondary); font-size: 11px; }
 .account-credits strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 15px; font-weight: 650; }
 .account-meters { display: grid; }
@@ -192,6 +192,9 @@ th:last-child, td:last-child { text-align: right; padding-right: 0; }
 .terminal-search { position: relative; flex: 1; max-width: 520px; display: block; }
 .terminal-search svg { position: absolute; top: 13px; left: 14px; color: var(--tertiary); pointer-events: none; }
 .terminal-search input { height: 44px; padding-left: 40px; background: var(--surface); box-shadow: 0 1px 2px rgba(0, 0, 0, .04); }
+.model-account { flex: 0 1 250px; min-width: 200px; }
+.model-account select { height: 44px; padding: 0 36px 0 12px; border: 1px solid var(--separator-strong); border-radius: 10px; background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, .04); }
+.model-account-note { margin: -8px 0 18px; color: var(--secondary); font-size: 12px; }
 .terminal-panel { overflow: hidden; background: #0d0d0f; border: 1px solid rgba(255, 255, 255, .08); border-radius: 18px; box-shadow: 0 18px 44px rgba(0, 0, 0, .16); }
 .terminal-head { min-height: 46px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 18px; border-bottom: 1px solid rgba(255, 255, 255, .08); background: rgba(255, 255, 255, .045); color: rgba(235, 235, 245, .72); font-size: 12px; }
 .terminal-head span:first-child { display: inline-flex; align-items: center; gap: 8px; }
@@ -265,7 +268,9 @@ input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0, 113, 22
   .key-row { grid-template-columns: 1fr auto auto; padding: 14px 0; }
   .key-meta { grid-column: 1 / -1; grid-row: 2; }
   .account-grid { grid-template-columns: 1fr; }
+  .account-credits { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .terminal-toolbar { align-items: stretch; flex-direction: column; }
+  .model-account { flex-basis: auto; }
   .terminal-panel { border-radius: 14px; }
   .terminal-line { grid-template-columns: 1fr; gap: 8px; }
   .terminal-time, .terminal-kind { width: fit-content; }
