@@ -62,3 +62,16 @@ const pricingByModelId = new Map(
 export function getGoPlanPricing(modelId) {
   return pricingByModelId.get(publicModelId(modelId).toLowerCase()) || null;
 }
+
+export function estimateUsageCredits(usage, pricing) {
+  if (!usage || !pricing) return null;
+  if (pricing.free === true) return 0;
+  const inputTokens = Math.max(0, Number(usage.inputTokens) || 0);
+  const cachedTokens = Math.min(inputTokens, Math.max(0, Number(usage.cachedTokens) || 0));
+  const outputTokens = Math.max(0, Number(usage.outputTokens) || 0);
+  const inputRate = Number(pricing.input);
+  const outputRate = Number(pricing.output);
+  const cacheReadRate = Number(pricing.cacheRead);
+  if (![inputRate, outputRate, cacheReadRate].every(Number.isFinite)) return null;
+  return ((inputTokens - cachedTokens) * inputRate + outputTokens * outputRate + cachedTokens * cacheReadRate) / 1_000_000;
+}

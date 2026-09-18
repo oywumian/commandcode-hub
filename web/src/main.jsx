@@ -30,6 +30,7 @@ const dateTime = (value) => value ? new Intl.DateTimeFormat('zh-CN', {
 }).format(new Date(value)) : '不可用';
 const whole = (value) => Number(value || 0).toLocaleString('zh-CN');
 const decimal = (value) => value === null || value === undefined || value === '' ? '不可用' : Number(value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const credits = (value) => value === null || value === undefined ? '—' : Number(value).toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 4, maximumFractionDigits: 4 });
 const rate = (value) => {
   if (value === null || value === undefined) return '—';
   const number = Number(value);
@@ -525,7 +526,7 @@ function ModelsPage({ notify }) {
     return lines.join('\n');
   }
 
-  function PricingCell({ pricing }) {
+    function PricingCell({ pricing }) {
     if (!pricing) return <span className="model-price-empty">—</span>;
     const tags = [];
     if (pricing.discountPercent) tags.push(`-${pricing.discountPercent}%`);
@@ -534,7 +535,12 @@ function ModelsPage({ notify }) {
       <strong>{pricing.free ? '免费' : `${rate(pricing.input)} / ${rate(pricing.output)}`}</strong>
       <small>{pricing.free ? 'Go 套餐' : `缓存读 ${rate(pricing.cacheRead)}`}{tags.length ? ` · ${tags.join(' · ')}` : ''}</small>
     </div>;
-  }
+    }
+
+    function UsageCreditsCell({ usageItem }) {
+      if (!usageItem || usageItem.estimatedCredits === null || usageItem.estimatedCredits === undefined) return <span className="model-price-empty">—</span>;
+      return <span className="model-credits" title="按 Go 官方参考价估算；普通输入、输出和缓存读 Token 分别计价，实际扣费以 Command Code Studio 为准。">{credits(usageItem.estimatedCredits)}</span>;
+    }
 
   return <>
     <div className="page-heading">
@@ -565,6 +571,7 @@ function ModelsPage({ notify }) {
         <span><small>今日输出 Token</small><strong>{whole(usage?.outputTokens)}</strong></span>
         <span><small>今日总 Token</small><strong>{whole(usage?.totalTokens)}</strong></span>
         <span><small>今日已消耗额度</small><strong className={creditsUsed === null ? 'muted' : ''}>{creditsUsed === null ? '暂无数据' : decimal(creditsUsed)}</strong></span>
+        <span><small>今日参考额度</small><strong className={usage?.estimatedCredits === null ? 'muted' : ''}>{credits(usage?.estimatedCredits)}</strong></span>
       </div>
       {pricingMeta ? <p className="model-pricing-note"><CircleDollarSign size={14} />Go 套餐参考价，更新于 {pricingMeta.capturedAt}；<a href={pricingMeta.sourceUrl} target="_blank" rel="noreferrer">查看官方价格</a>。实际扣费以 Command Code Studio 为准。</p> : null}
     </> : null}
@@ -579,8 +586,8 @@ function ModelsPage({ notify }) {
     {error ? <div className="notice error">{error}</div> : null}
     {visibleModels.length ? <div className="model-table-wrap">
       <table className="model-table">
-        <colgroup><col className="model-col-id" /><col className="model-col-state" /><col className="model-col-price" /><col className="model-col-tokens" /><col className="model-col-owner" /><col className="model-col-tested" /><col className="model-col-action" /></colgroup>
-        <thead><tr><th>模型 ID</th><th>状态</th><th>Go 参考价 /1M</th><th>今日 Token</th><th>来源</th><th>检测时间</th><th><span className="sr-only">操作</span></th></tr></thead>
+        <colgroup><col className="model-col-id" /><col className="model-col-state" /><col className="model-col-price" /><col className="model-col-tokens" /><col className="model-col-credits" /><col className="model-col-owner" /><col className="model-col-tested" /><col className="model-col-action" /></colgroup>
+        <thead><tr><th>模型 ID</th><th>状态</th><th>Go 参考价 /1M</th><th>今日 Token</th><th>今日参考额度</th><th>来源</th><th>检测时间</th><th><span className="sr-only">操作</span></th></tr></thead>
         <tbody>
       {visibleModels.map((model) => {
         const state = modelState(model);
@@ -589,6 +596,7 @@ function ModelsPage({ notify }) {
               <td><span className={`model-state ${state.key}`}>{state.label}</span></td>
               <td><PricingCell pricing={model.pricing} /></td>
               <td className="model-tokens">{whole(usageByModel.get(model.id)?.totalTokens)}</td>
+              <td><UsageCreditsCell usageItem={usageByModel.get(model.id)} /></td>
               <td className="model-owner">{model.owned_by || '上游模型'}</td>
               <td className="model-tested" title={model.error || ''}>{model.testedAt ? dateTime(model.testedAt) : '未检测'}</td>
               <td><button className="icon-button model-copy" title="复制模型 ID" onClick={() => copyModel(model.id)}><Copy size={15} /></button></td>
