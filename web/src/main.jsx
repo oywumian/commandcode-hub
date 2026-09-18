@@ -528,16 +528,23 @@ function ModelsPage({ notify }) {
       <div className="model-test-foot"><span>{testJob.current ? `当前 ${testJob.current}` : '仅停用明确无权限的模型'}</span><span>可用 {testJob.available} · 停用 {testJob.unavailable} · 待确认 {testJob.unknown}</span></div>
     </section> : null}
     {error ? <div className="notice error">{error}</div> : null}
-    {filtered.length ? <div className="model-grid">
+    {filtered.length ? <div className="model-table-wrap">
+      <table className="model-table">
+        <colgroup><col className="model-col-id" /><col className="model-col-state" /><col className="model-col-owner" /><col className="model-col-tested" /><col className="model-col-action" /></colgroup>
+        <thead><tr><th>模型 ID</th><th>状态</th><th>来源</th><th>检测时间</th><th><span className="sr-only">操作</span></th></tr></thead>
+        <tbody>
       {filtered.map((model) => {
         const state = modelState(model);
-        return <article key={model.id} className={`model-card ${state.key}`}>
-          <div className="model-card-head"><Boxes size={18} /><code>{model.id}</code></div>
-          <span className={`model-state ${state.key}`}>{state.label}</span>
-          <div className="model-card-meta"><span>{model.owned_by || '上游模型'}</span><span title={model.error || ''}>{model.testedAt ? `检测 ${dateTime(model.testedAt)}` : model.object || 'model'}</span></div>
-          <button className="icon-button" title="复制模型 ID" onClick={() => copyModel(model.id)}><Copy size={16} /></button>
-        </article>;
-      })}
+            return <tr key={model.id} className={`model-row ${state.key}`}>
+              <td><div className="model-id-cell"><Boxes size={16} /><code title={model.id}>{model.id}</code></div></td>
+              <td><span className={`model-state ${state.key}`}>{state.label}</span></td>
+              <td className="model-owner">{model.owned_by || '上游模型'}</td>
+              <td className="model-tested" title={model.error || ''}>{model.testedAt ? dateTime(model.testedAt) : '未检测'}</td>
+              <td><button className="icon-button model-copy" title="复制模型 ID" onClick={() => copyModel(model.id)}><Copy size={15} /></button></td>
+            </tr>;
+          })}
+        </tbody>
+      </table>
     </div> : <Empty>{loading ? '正在读取该账号的模型…' : accounts.length ? '没有匹配模型。' : '请先添加 Command Code 账号。'}</Empty>}
   </>;
 }
