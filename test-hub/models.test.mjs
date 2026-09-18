@@ -40,6 +40,8 @@ test('admin models proxy returns only the upstream model catalog', async () => {
     assert.equal(data.models[0].id, 'gpt-test');
     assert.equal(data.models[0].enabled, true);
     assert.equal(data.models[0].status, 'untested');
+    assert.equal(data.models[0].pricing, null);
+    assert.equal(data.pricingMeta.plan, 'go');
   } finally {
     await close(server);
     await close(internal);
@@ -84,6 +86,8 @@ test('admin models proxy reads the selected account catalog', async () => {
     assert.equal(data.models[0].id, 'Kimi-K3');
     assert.equal(data.models[0].enabled, true);
     assert.equal(data.models[0].status, 'untested');
+    assert.equal(data.models[0].pricing.input, 3);
+    assert.equal(data.models[0].pricing.output, 15);
   } finally {
     await close(server);
     await close(internal);

@@ -30,6 +30,12 @@ const dateTime = (value) => value ? new Intl.DateTimeFormat('zh-CN', {
 }).format(new Date(value)) : '不可用';
 const whole = (value) => Number(value || 0).toLocaleString('zh-CN');
 const decimal = (value) => value === null || value === undefined || value === '' ? '不可用' : Number(value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const rate = (value) => {
+  if (value === null || value === undefined) return '—';
+  const number = Number(value);
+  const digits = Math.abs(number) > 0 && Math.abs(number) < 0.01 ? 4 : Math.abs(number) < 1 ? 3 : 2;
+  return `$${number.toLocaleString('zh-CN', { minimumFractionDigits: Math.min(2, digits), maximumFractionDigits: digits })}`;
+};
 const duration = (value) => value >= 1000 ? `${(value / 1000).toFixed(1)} 秒` : `${Math.round(value || 0)} 毫秒`;
 const percent = (used, cap) => cap > 0 && used !== null ? Math.min(100, Math.max(0, used / cap * 100)) : null;
 const preciseTime = (value) => new Intl.DateTimeFormat('zh-CN', {
@@ -392,6 +398,7 @@ function ModelsPage({ notify }) {
   const [accountId, setAccountId] = useState('');
   const [models, setModels] = useState([]);
   const [usage, setUsage] = useState(null);
+  const [pricingMeta, setPricingMeta] = useState(null);
   const [testJob, setTestJob] = useState({ status: 'idle' });
   const [loading, setLoading] = useState(true);
   const [testing, setTesting] = useState(false);
@@ -419,6 +426,7 @@ function ModelsPage({ notify }) {
     if (!accountId) {
       setModels([]);
       setUsage(null);
+      setPricingMeta(null);
       setLoading(false);
       return;
     }
@@ -428,6 +436,7 @@ function ModelsPage({ notify }) {
       const data = await api(`/api/admin/models?accountId=${encodeURIComponent(accountId)}`);
       setModels(data.models || []);
       setUsage(data.usage || null);
+      setPricingMeta(data.pricingMeta || null);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -466,10 +475,16 @@ function ModelsPage({ notify }) {
   }, [testJob.status, accountId, load, loadTestStatus, notify]);
 
   const selectedAccount = accounts.find((account) => account.id === accountId) || null;
-  const filtered = models.filter((model) => String(model.id || '').toLowerCase().includes(query.trim().toLowerCase()));
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleModels = models.filter((model) => {
+    if (!normalizedQuery) return true;
+    return String(model.id || '').toLowerCase().includes(normalizedQuery)
+      || String(model.pricing?.name || '').toLowerCase().includes(normalizedQuery);
+  });
   const enabledCount = models.filter((model) => model.enabled).length;
   const progress = testJob.total ? Math.round(testJob.completed / testJob.total * 100) : 0;
   const usageByModel = new Map((usage?.models || []).map((item) => [item.modelId, item]));
+  const creditsUsed = usage?.credits?.value ?? null;
 
   async function copyModel(id) {
     await navigator.clipboard.writeText(id);
@@ -501,6 +516,26 @@ function ModelsPage({ notify }) {
     return { key: 'untested', label: '未检测' };
   }
 
+  function pricingTitle(pricing) {
+    if (!pricing) return '官方价格表未提供该模型报价';
+    const lines = [`输入 ${rate(pricing.input)} / 1M`, `输出 ${rate(pricing.output)} / 1M`, `缓存读 ${rate(pricing.cacheRead)} / 1M`];
+    if (pricing.cacheWrite !== null) lines.push(`缓存写 ${rate(pricing.cacheWrite)} / 1M`);
+    if (pricing.original) lines.push(`折扣前：输入 ${rate(pricing.original.input)}，输出 ${rate(pricing.original.output)}，缓存读 ${rate(pricing.original.cacheRead)}`);
+    if (pricing.timeOfDay) lines.push(`${pricing.timeOfDay.label}；高峰时段 ${pricing.timeOfDay.window}`);
+    return lines.join('\n');
+  }
+
+  function PricingCell({ pricing }) {
+    if (!pricing) return <span className="model-price-empty">—</span>;
+    const tags = [];
+    if (pricing.discountPercent) tags.push(`-${pricing.discountPercent}%`);
+    if (pricing.timeOfDay) tags.push(pricing.timeOfDay.label);
+    return <div className="model-price-stack" title={pricingTitle(pricing)}>
+      <strong>{pricing.free ? '免费' : `${rate(pricing.input)} / ${rate(pricing.output)}`}</strong>
+      <small>{pricing.free ? 'Go 套餐' : `缓存读 ${rate(pricing.cacheRead)}`}{tags.length ? ` · ${tags.join(' · ')}` : ''}</small>
+    </div>;
+  }
+
   return <>
     <div className="page-heading">
       <div><p className="eyebrow">账号权限目录</p><h1>模型库</h1></div>
@@ -518,9 +553,9 @@ function ModelsPage({ notify }) {
       </label>
       <label className="terminal-search">
         <Search size={16} />
-        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索模型 ID" />
+        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索模型 ID 或名称" />
       </label>
-      <span>{filtered.length} / {models.length} 个模型</span>
+      <span>{visibleModels.length} / {models.length} 个模型</span>
     </div>
     {selectedAccount ? <>
       <p className="model-account-note">「{selectedAccount.name}」已启用 {enabledCount} / {models.length}；终端 /v1/models 只返回已启用模型。</p>
@@ -529,8 +564,9 @@ function ModelsPage({ notify }) {
         <span><small>今日输入 Token</small><strong>{whole(usage?.inputTokens)}</strong></span>
         <span><small>今日输出 Token</small><strong>{whole(usage?.outputTokens)}</strong></span>
         <span><small>今日总 Token</small><strong>{whole(usage?.totalTokens)}</strong></span>
-        <span><small>今日已消耗额度</small><strong className={usage?.credits?.value === null ? 'muted' : ''}>{usage?.credits?.value === null ? '暂无数据' : decimal(usage.credits.value)}</strong></span>
+        <span><small>今日已消耗额度</small><strong className={creditsUsed === null ? 'muted' : ''}>{creditsUsed === null ? '暂无数据' : decimal(creditsUsed)}</strong></span>
       </div>
+      {pricingMeta ? <p className="model-pricing-note"><CircleDollarSign size={14} />Go 套餐参考价，更新于 {pricingMeta.capturedAt}；<a href={pricingMeta.sourceUrl} target="_blank" rel="noreferrer">查看官方价格</a>。实际扣费以 Command Code Studio 为准。</p> : null}
     </> : null}
     {testJob.status !== 'idle' ? <section className={`model-test-panel ${testJob.status}`}>
       <div className="model-test-head">
@@ -541,16 +577,17 @@ function ModelsPage({ notify }) {
       <div className="model-test-foot"><span>{testJob.current ? `当前 ${testJob.current}` : '仅停用明确无权限的模型'}</span><span>可用 {testJob.available} · 停用 {testJob.unavailable} · 待确认 {testJob.unknown}</span></div>
     </section> : null}
     {error ? <div className="notice error">{error}</div> : null}
-    {filtered.length ? <div className="model-table-wrap">
+    {visibleModels.length ? <div className="model-table-wrap">
       <table className="model-table">
-        <colgroup><col className="model-col-id" /><col className="model-col-state" /><col className="model-col-tokens" /><col className="model-col-owner" /><col className="model-col-tested" /><col className="model-col-action" /></colgroup>
-        <thead><tr><th>模型 ID</th><th>状态</th><th>今日 Token</th><th>来源</th><th>检测时间</th><th><span className="sr-only">操作</span></th></tr></thead>
+        <colgroup><col className="model-col-id" /><col className="model-col-state" /><col className="model-col-price" /><col className="model-col-tokens" /><col className="model-col-owner" /><col className="model-col-tested" /><col className="model-col-action" /></colgroup>
+        <thead><tr><th>模型 ID</th><th>状态</th><th>Go 参考价 /1M</th><th>今日 Token</th><th>来源</th><th>检测时间</th><th><span className="sr-only">操作</span></th></tr></thead>
         <tbody>
-      {filtered.map((model) => {
+      {visibleModels.map((model) => {
         const state = modelState(model);
             return <tr key={model.id} className={`model-row ${state.key}`}>
               <td><div className="model-id-cell"><Boxes size={16} /><code title={model.id}>{model.id}</code></div></td>
               <td><span className={`model-state ${state.key}`}>{state.label}</span></td>
+              <td><PricingCell pricing={model.pricing} /></td>
               <td className="model-tokens">{whole(usageByModel.get(model.id)?.totalTokens)}</td>
               <td className="model-owner">{model.owned_by || '上游模型'}</td>
               <td className="model-tested" title={model.error || ''}>{model.testedAt ? dateTime(model.testedAt) : '未检测'}</td>

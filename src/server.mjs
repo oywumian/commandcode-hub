@@ -9,6 +9,7 @@ import { fetchQuota } from './quota.mjs';
 import { createAdminAuth } from './admin-auth.mjs';
 import { createUsageParser } from './usage-parser.mjs';
 import { createModelTester } from './model-tester.mjs';
+import { getGoPlanPricing, GO_PLAN_PRICING_META } from './model-pricing.mjs';
 import { publicModelId } from '../model-catalog.mjs';
 
 const MIME = {
@@ -191,6 +192,7 @@ export function createHubApp(config, store, options = {}) {
       return {
         ...model,
         id,
+        pricing: getGoPlanPricing(id),
         enabled: state?.enabled ?? true,
         status: state?.status || 'untested',
         error: state?.error || '',
@@ -509,7 +511,8 @@ export function createHubApp(config, store, options = {}) {
         const usage = store.modelUsageToday?.(account.id, dayStart.getTime()) || { requests: 0, inputTokens: 0, outputTokens: 0, cachedTokens: 0, reasoningTokens: 0, totalTokens: 0, models: [] };
         usage.credits = store.confirmedCreditsUsedToday?.(account.id, dayStart.getTime()) || { value: null, status: 'unavailable', from: null, at: null };
         return json(res, 200, {
-          account: { id: account.id, name: account.name, enabled: account.enabled, isDefault: account.isDefault },
+          account: { id: account.id, name: account.name, enabled: account.enabled, isDefault: account.isDefault, planId: account.planId || '', planName: account.planName || '' },
+          pricingMeta: GO_PLAN_PRICING_META,
           models,
           usage,
         });
