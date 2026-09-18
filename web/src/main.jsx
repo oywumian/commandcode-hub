@@ -309,7 +309,7 @@ function SystemPage({ notify, onPasswordChanged }) {
   const [runtime, setRuntime] = useState(null);
   const [security, setSecurity] = useState(null);
   const [passwords, setPasswords] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
-  const [keyForm, setKeyForm] = useState({ name: '', password: '' });
+  const [keyForm, setKeyForm] = useState({ name: '' });
   const [generatedKey, setGeneratedKey] = useState('');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
@@ -349,7 +349,7 @@ function SystemPage({ notify, onPasswordChanged }) {
     try {
       const result = await api('/api/admin/security/api-keys', { method: 'POST', body: JSON.stringify(keyForm) });
       setGeneratedKey(result.apiKey);
-      setKeyForm({ name: '', password: '' });
+      setKeyForm({ name: '' });
       await load();
       notify('API Key 已创建');
     } catch (err) { setError(err.message); } finally { setBusy(''); }
@@ -363,8 +363,7 @@ function SystemPage({ notify, onPasswordChanged }) {
       notify(message);
     } catch (err) { setError(err.message); } finally { setBusy(''); }
   }
-  async function deleteKey(id, name) {
-    if (!confirm(`删除 API Key“${name}”？使用它的客户端将立即无法访问。`)) return;
+  async function deleteKey(id) {
     setError('');
     setBusy(id);
     try {
@@ -386,12 +385,11 @@ function SystemPage({ notify, onPasswordChanged }) {
           <div className="key-identity"><strong>{key.name}</strong><code>{key.maskedKey}</code></div>
           <div className="key-meta"><span>最近使用 {dateTime(key.lastUsedAt)}</span><span>创建于 {dateTime(key.createdAt)}</span></div>
           <label className="switch" title={key.enabled ? '停用' : '启用'}><input type="checkbox" checked={key.enabled} disabled={busy === key.id} onChange={(event) => updateKey(key.id, { enabled: event.target.checked }, event.target.checked ? 'API Key 已启用' : 'API Key 已停用')} /><i /></label>
-          <button className="icon-button danger" disabled={busy === key.id} title="删除" onClick={() => deleteKey(key.id, key.name)}><Trash2 size={17} /></button>
+          <button className="icon-button danger" disabled={busy === key.id} title="删除" onClick={() => deleteKey(key.id)}><Trash2 size={17} /></button>
         </div>)}
       </div>
       <form className="security-form key-create" onSubmit={createKey}>
         <label>名称<input value={keyForm.name} maxLength="60" onChange={(event) => setKeyForm({ ...keyForm, name: event.target.value })} placeholder="例如：OpenCode" required /></label>
-        <label>管理员密码<input type="password" value={keyForm.password} onChange={(event) => setKeyForm({ ...keyForm, password: event.target.value })} required autoComplete="current-password" /></label>
         <Button kind="primary" icon={Plus} busy={busy === 'key'} type="submit">创建 API Key</Button>
       </form>
     </section>

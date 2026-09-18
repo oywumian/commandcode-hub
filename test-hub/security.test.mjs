@@ -32,7 +32,7 @@ test('admin manages multiple gateway keys and changes a six-character password',
 
     const createdResponse = await request('/api/admin/security/api-keys', {
       method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'OpenCode', password: 'admin1' }),
+      body: JSON.stringify({ name: 'OpenCode' }),
     });
     assert.equal(createdResponse.status, 201);
     const created = await createdResponse.json();
@@ -54,6 +54,10 @@ test('admin manages multiple gateway keys and changes a six-character password',
     assert.equal((await request(`/api/admin/security/api-keys/${bootstrap.id}`, {
       method: 'PUT', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: false }),
     })).status, 400);
+    assert.equal((await request(`/api/admin/security/api-keys/${created.key.id}`, {
+      method: 'DELETE', headers: { Cookie: cookie },
+    })).status, 200);
+    assert.equal((await (await request('/api/admin/security', { headers: { Cookie: cookie } })).json()).apiKeys.length, 1);
 
     const changed = await request('/api/admin/security/password', {
       method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' },

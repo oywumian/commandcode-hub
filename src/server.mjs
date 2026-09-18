@@ -355,9 +355,6 @@ export function createHubApp(config, store, options = {}) {
     }
     if (url.pathname === '/api/admin/security/api-keys' && req.method === 'POST') {
       const body = await readJson(req);
-      if (!auth.verifyPassword(String(body.password || ''))) {
-        return errorJson(res, 401, 'Current password is incorrect', 'authentication_error');
-      }
       const name = String(body.name || '').trim().slice(0, 60);
       if (!name) return errorJson(res, 400, 'API key name is required', 'invalid_api_key');
       const apiKey = `sk-${crypto.randomBytes(32).toString('hex')}`;

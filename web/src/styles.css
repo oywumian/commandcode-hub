@@ -174,7 +174,7 @@ th:last-child, td:last-child { text-align: right; padding-right: 0; }
 .credential-line code { font-size: 14px; color: var(--text); }
 .security-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; align-items: end; gap: 16px; }
 .security-form.inline { grid-template-columns: minmax(220px, 360px) auto; justify-content: start; }
-.security-form.key-create { grid-template-columns: minmax(180px, 1fr) minmax(220px, 1fr) auto; margin-top: 24px; }
+.security-form.key-create { grid-template-columns: minmax(240px, 1fr) auto; margin-top: 24px; }
 .security-form .button { min-height: 42px; }
 .key-list { border-top: 1px solid var(--separator); }
 .key-row { min-height: 72px; display: grid; grid-template-columns: minmax(180px, 1fr) minmax(230px, 1fr) auto auto; align-items: center; gap: 18px; border-bottom: 1px solid var(--separator); }
