@@ -359,8 +359,9 @@ function Requests() {
       <Stat icon={ChevronRight} label="输入 Token" value={whole(summary.input_tokens)} detail={`缓存 ${whole(summary.cached_tokens)}`} />
       <Stat icon={ChevronRight} label="输出 Token" value={whole(summary.output_tokens)} detail="模型输出" />
     </section>
-    <div className="table-wrap"><table><thead><tr><th>时间</th><th>账号</th><th>接口</th><th>模型</th><th>状态</th><th>Token</th><th>耗时</th></tr></thead><tbody>
-      {(data?.requests || []).map((row) => <tr key={row.id}><td>{dateTime(row.created_at)}</td><td>{row.account_name || '已删除'}</td><td><code>{row.path}</code>{row.streaming ? <span className="tag subtle">流式</span> : null}</td><td>{row.model || '未知'}</td><td><span className={row.status >= 200 && row.status < 400 ? 'good' : 'bad'}>{row.status}</span></td><td>{whole(row.input_tokens + row.output_tokens)}</td><td>{duration(row.duration_ms)}</td></tr>)}
+    <p className="model-pricing-note request-pricing-note"><CircleDollarSign size={14} />额度按 Go 官方参考价和该次请求的 Token 估算；实际扣费以 Command Code Studio 为准。</p>
+    <div className="table-wrap"><table><thead><tr><th>时间</th><th>账号</th><th>接口</th><th>模型</th><th>状态</th><th>Token</th><th>额度</th><th>耗时</th></tr></thead><tbody>
+      {(data?.requests || []).map((row) => <tr key={row.id}><td>{dateTime(row.created_at)}</td><td>{row.account_name || '已删除'}</td><td><code>{row.path}</code>{row.streaming ? <span className="tag subtle">流式</span> : null}</td><td>{row.model || '未知'}</td><td><span className={row.status >= 200 && row.status < 400 ? 'good' : 'bad'}>{row.status}</span></td><td>{whole(row.input_tokens + row.output_tokens)}</td><td className="request-credits" title="按 Go 官方参考价估算；实际扣费以 Command Code Studio 为准。">{credits(row.estimated_credits)}</td><td>{duration(row.duration_ms)}</td></tr>)}
     </tbody></table>{!data?.requests?.length ? <Empty>所选时间内没有请求。</Empty> : null}</div>
   </>;
 }

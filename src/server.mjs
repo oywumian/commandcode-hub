@@ -153,6 +153,15 @@ function validateApiKey(value) {
   return key;
 }
 
+function requestLogWithEstimatedCredits(row) {
+  const inputTokens = Number(row?.input_tokens) || 0;
+  const outputTokens = Number(row?.output_tokens) || 0;
+  const cachedTokens = Number(row?.cached_tokens) || 0;
+  if (inputTokens <= 0 && outputTokens <= 0 && cachedTokens <= 0) return { ...row, estimated_credits: null };
+  const estimatedCredits = estimateUsageCredits({ inputTokens, outputTokens, cachedTokens }, getGoPlanPricing(row?.model));
+  return { ...row, estimated_credits: estimatedCredits };
+}
+
 function apiError(res, error) {
   const status = Number(error.status) || (error.code === 'SQLITE_CONSTRAINT_UNIQUE' ? 409 : 500);
   const message = status >= 500 ? 'Internal server error' : error.message;
@@ -515,7 +524,7 @@ export function createHubApp(config, store, options = {}) {
       const days = Math.min(7, Math.max(1, Number(url.searchParams.get('days')) || 1));
       const from = Date.now() - days * 86400000;
       return json(res, 200, {
-        requests: store.listRequestLogs({ from, limit: Number(url.searchParams.get('limit')) || 200 }),
+        requests: store.listRequestLogs({ from, limit: Number(url.searchParams.get('limit')) || 200 }).map(requestLogWithEstimatedCredits),
         summary: store.requestSummary(from),
         series: store.requestSeries(from, days > 2 ? 86400000 : 3600000),
       });

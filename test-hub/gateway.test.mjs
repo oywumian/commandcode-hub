@@ -23,6 +23,12 @@ test('gateway validates its key and injects the selected account key', async () 
     changeAdminPassword: () => 2,
     authenticateGatewayKey: (value) => value === 'gateway-secret' ? { id: 'gateway-1' } : null,
     getDefaultAccountWithKey: () => ({ id: 'account-1', apiKey: 'user_real_key' }),
+    listRequestLogs: () => [
+      { id: 1, model: 'gpt-5.6-luna', input_tokens: 1_000_000, output_tokens: 500_000, cached_tokens: 0 },
+      { id: 2, model: 'unknown-model', input_tokens: 100, output_tokens: 20, cached_tokens: 0 },
+    ],
+    requestSummary: () => ({ total: 0, successful: 0, input_tokens: 0, output_tokens: 0, cached_tokens: 0, avg_duration_ms: 0 }),
+    requestSeries: () => [],
     addRequestLog: (log) => logs.push(log),
     addTerminalEvent: (event) => terminalEvents.push(event),
     listTerminalEvents: ({ limit } = {}) => terminalEvents.slice(0, limit),
@@ -66,6 +72,11 @@ test('gateway validates its key and injects the selected account key', async () 
     const cleared = await fetch(`http://127.0.0.1:${gatewayPort}/api/admin/terminal/clear`, { method: 'POST', headers: { Cookie: cookie } });
     assert.equal(cleared.status, 200);
     assert.equal(terminalEvents.length, 0);
+    const requests = await fetch(`http://127.0.0.1:${gatewayPort}/api/admin/requests`, { headers: { Cookie: cookie } });
+    const requestsData = await requests.json();
+    assert.equal(requests.status, 200);
+    assert.equal(requestsData.requests[0].estimated_credits, 0.8);
+    assert.equal(requestsData.requests[1].estimated_credits, null);
   } finally {
     await close(gateway);
     await close(internal);

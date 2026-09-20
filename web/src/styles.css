@@ -337,3 +337,5 @@ input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0, 113, 22
   .model-usage-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .model-usage-strip span:nth-last-child(-n + 2) { grid-column: 1 / -1; }
 }
+.request-pricing-note { margin: -24px 0 18px; }
+.request-credits { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 550; }
